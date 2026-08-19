@@ -185,7 +185,10 @@ test("crushEntry ticket always triggers giant crush on paid spin", async () => {
   assert.ok(spin.crushEvent.reelsBeforeCrush);
   spin.crushEvent.crushedCells.forEach((cell) => {
     assert.equal(Number(spin.reels[cell.reel][cell.row]), 0);
+    assert.ok(cell.coinType >= 20 && cell.coinType <= 27);
+    assert.ok(Number(cell.coinValue) > 0);
   });
+  assert.ok(Number(spin.twa) >= Number(spin.crushEvent.coinWin || 0));
   assert.equal(spin.stompEvent, null);
 });
 

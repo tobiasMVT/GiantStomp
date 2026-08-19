@@ -19,15 +19,16 @@ Resolution order on paid spin (before ways evaluation):
 
 1. Try `stompFeature` first.
 2. If stomp triggered, **crush is skipped**.
-3. Otherwise roll crush odds; if pass, draw `crushAmount`, pick that many distinct animals, zero their cells.
+3. Otherwise roll crush odds; if pass, draw `crushAmount`, pick that many distinct animals, zero their cells, and assign weighted coin drops per animal (same as stomp).
 
 Emits `crushEvent` on the `spin` action state:
 
 ```js
 {
   triggered: true,
-  crushedCells: [{ reel, row, symbol, isAnimal: true }, ...],
+  crushedCells: [{ reel, row, symbol, isAnimal: true, coinType, coinValue }, ...],
   crushCount,
+  coinWin,
   reelsBeforeCrush,
   teaseMs: 700,
   pauseMs: 350
@@ -43,7 +44,8 @@ Dev entry:
 
 - Drop uses `crushEvent.reelsBeforeCrush` so grabbed animals are visible before the hand arrives.
 - `buildSegmentFlow.js` runs `presentCrushFeature` after settle (mutually exclusive with stomp segment).
-- For each crushed cell: `open_hand.png` slides in → pinch → mini squeeze shake → crossfade to `snapped_hand.png` → blood/gibs → snapped hand slides out left → open hand reappears and slides out left again.
+- For each crushed cell: `open_hand.png` slides in → pinch → mini squeeze shake → crossfade to `snapped_hand.png` → blood/gibs + `yellow_coin` drop → snapped hand slides out left → open hand reappears and slides out left again.
+- Crush coins use the same stomp coin registry and are collected during `updateCountUp` via `collectStompCoinsToWin`.
 - No hand/foot fade exits — both slide out the same direction they entered.
 
 Assets: `src/game-client/assets/giantstomp/giant_in_bg.png`, `open_hand.png`, `snapped_hand.png`.

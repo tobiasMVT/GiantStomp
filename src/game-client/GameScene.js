@@ -1064,7 +1064,7 @@ export class GameScene extends Phaser.Scene {
     openHand.destroy();
   }
 
-  async crushGrabbedSymbol(sprite, handX, handY) {
+  async crushGrabbedSymbol(sprite, handX, handY, cell = {}) {
     if (!sprite?.active) return;
     const reel = Number(sprite.reel);
     const row = Number(sprite.row);
@@ -1089,6 +1089,7 @@ export class GameScene extends Phaser.Scene {
 
     this.spawnBloodBurst(handX, handY - CELL_SIZE * 0.05, groundY);
     this.spawnGibs(handX, handY - CELL_SIZE * 0.05, groundY);
+    this.spawnCoinDrop(handX, handY - CELL_SIZE * 0.05, groundY, cell);
     this.cameras.main.shake(220, 0.009);
   }
 
@@ -1166,7 +1167,7 @@ export class GameScene extends Phaser.Scene {
     await this.presentMiniSqueezeShake(openHand, 300);
     this.syncCrushHandPair(openHand, snappedHand);
     await this.crossfadeCrushHand(openHand, snappedHand, 130);
-    await this.crushGrabbedSymbol(sprite, target.x, target.y);
+    await this.crushGrabbedSymbol(sprite, target.x, target.y, cell);
 
     await this.waitForPresentation(280, { skippable: true });
 

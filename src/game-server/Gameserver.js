@@ -414,7 +414,7 @@ export class GameServer {
     };
   }
 
-  resolveCrushFeature(board, { forceCrush = false, allowNatural = false } = {}) {
+  resolveCrushFeature(board, { forceCrush = false, allowNatural = false, betSize = 1 } = {}) {
     if (!forceCrush && !allowNatural) return null;
     const cfg = this.getCrushConfig();
     const triggered = forceCrush || this.random() < Number(cfg.odds || 0);
@@ -434,14 +434,21 @@ export class GameServer {
     for (let index = 0; index < picks; index += 1) {
       const pickIndex = Math.floor(this.random() * pool.length);
       const target = pool.splice(pickIndex, 1)[0];
+      const coinType = this.drawCoinType();
       crushedCells.push({
         reel: target.reel,
         row: target.row,
         symbol: target.symbol,
         isAnimal: true,
+        coinType,
+        coinValue: this.getCoinValue(coinType, betSize),
       });
       nextBoard[target.reel][target.row] = 0;
     }
+
+    const coinWin = crushedCells
+      .filter((cell) => cell.isAnimal && Number(cell.coinValue) > 0)
+      .reduce((sum, cell) => asTbm(sum + Number(cell.coinValue)), 0);
 
     return {
       board: nextBoard,
@@ -450,6 +457,7 @@ export class GameServer {
         crushedCells,
         crushCount: crushedCells.length,
         reelsBeforeCrush: clone(board),
+        coinWin,
         teaseMs: 700,
         pauseMs: 350,
       },
@@ -590,11 +598,13 @@ export class GameServer {
         } else {
           const crushResult = this.resolveCrushFeature(board, {
             forceCrush,
-            allowNatural: allowNaturalCrush
+            allowNatural: allowNaturalCrush,
+            betSize,
           });
           if (crushResult) {
             board = crushResult.board;
             crushEvent = crushResult.crushEvent;
+            totals.twa = asTbm(totals.twa + Number(crushEvent.coinWin || 0));
           }
         }
       }
