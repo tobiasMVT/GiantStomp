@@ -1,7 +1,7 @@
 ﻿const gameClientConfig = {
   gameName: "Giant Stomp",
   layout: {
-    mustSeeBounds: { x: 0, y: 0, width: 490, height: 466 },
+    mustSeeBounds: { x: 0, y: 0, width: 428, height: 458 },
     freeArea: {
       minBottomPx: 150,
       fitPaddingPx: 0,

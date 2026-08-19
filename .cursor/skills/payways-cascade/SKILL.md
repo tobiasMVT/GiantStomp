@@ -38,7 +38,7 @@ Initial `spin` and `freespin` use the full-board top drop. `respin` and `freeres
 - Count each newly landed scatter once, including scatter symbols introduced by a cascade.
 - Emit `scatterLandings` on the action where the scatter arrives.
 - A scatter is consumed after charging Anger and must not charge again if it survives into another cascade.
-- Anger persists across paid rounds on the server session instance.
+- Anger resets at the start of each paid round. Collect scatters from the initial `spin` through cascades until `nextAction` is `spin`.
 - Three consumed scatters fill Anger, reset it, and enter a three-freespin bonus.
 - Once a round has triggered the bonus, further scatters in that round have no effect.
 - Bonus recharge and special bonus symbols are intentionally deferred.

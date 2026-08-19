@@ -26,10 +26,6 @@ export class GameServer {
     this.random = typeof normalizedOptions.random === "function" ? normalizedOptions.random : Math.random;
     this.boardProvider =
       typeof normalizedOptions.boardProvider === "function" ? normalizedOptions.boardProvider : null;
-    this.anger = Math.max(
-      0,
-      Math.min(serverConfig.anger.maximum, Math.floor(Number(normalizedOptions.anger) || 0))
-    );
   }
 
   roundCurrency(value) {
@@ -117,7 +113,7 @@ export class GameServer {
         throw new Error(`Every reel must contain ${this.height} rows`);
       }
       reel.forEach((symbol) => {
-        if (!Number.isInteger(Number(symbol)) || Number(symbol) < 1 || Number(symbol) > 8) {
+        if (!Number.isInteger(Number(symbol)) || Number(symbol) < 1 || Number(symbol) > 27) {
           throw new Error(`Invalid symbol: ${symbol}`);
         }
       });
@@ -141,9 +137,26 @@ export class GameServer {
     }
     if (ticket === "bonusEntry") {
       const board = this.buildNoWinBoard();
-      board[0][0] = 8;
-      board[2][1] = 8;
-      board[4][2] = 8;
+      const scatter = serverConfig.scatterSymbol;
+      board[0][0] = scatter;
+      board[2][1] = scatter;
+      board[4][2] = scatter;
+      return board;
+    }
+    if (ticket === "stompEntry") {
+      const board = this.buildNoWinBoard();
+      for (let reel = 1; reel <= 3; reel += 1) {
+        for (let row = 0; row < this.height; row += 1) {
+          board[reel][row] = ((reel + row) % 5) + 1;
+        }
+      }
+      return board;
+    }
+    if (ticket === "crushEntry") {
+      const board = this.buildNoWinBoard();
+      board[4][0] = 1;
+      board[4][1] = 2;
+      board[4][2] = 3;
       return board;
     }
     return this.generateRandomBoard(isBonus ? serverConfig.bonusSymbolWeights : serverConfig.symbolWeights);
@@ -270,11 +283,198 @@ export class GameServer {
     return positions;
   }
 
+  getStompConfig() {
+    return serverConfig.stompFeature || {
+      stompReelSizeMin: 2,
+      stompReelSizeMax: 3,
+      odds: 0.05
+    };
+  }
+
+  getCrushConfig() {
+    return serverConfig.crushFeature || { odds: 0.05 };
+  }
+
+  getAnimalSymbolSet() {
+    return new Set(
+      Array.isArray(serverConfig.animalSymbols) ? serverConfig.animalSymbols.map(Number) : [1, 2, 3, 4, 5]
+    );
+  }
+
+  findAnimalPositions(board) {
+    const animalSymbols = this.getAnimalSymbolSet();
+    const positions = [];
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        const symbol = Number(board[reel][row]);
+        if (animalSymbols.has(symbol)) {
+          positions.push({ reel, row, symbol, isAnimal: true });
+        }
+      }
+    }
+    return positions;
+  }
+
+  drawCoinType() {
+    const entries = Object.entries(serverConfig.coinTypes || {}).filter(([, weight]) => Number(weight) > 0);
+    if (!entries.length) return 20;
+    const total = entries.reduce((sum, [, weight]) => sum + Number(weight), 0);
+    let pick = this.random() * total;
+    for (const [coinType, weight] of entries) {
+      pick -= Number(weight);
+      if (pick < 0) return Number(coinType);
+    }
+    return Number(entries.at(-1)?.[0] || 20);
+  }
+
+  drawWeightedKey(weights = {}, fallbackKey = "1") {
+    const entries = Object.entries(weights).filter(([, weight]) => Number(weight) > 0);
+    if (!entries.length) return fallbackKey;
+    const total = entries.reduce((sum, [, weight]) => sum + Number(weight), 0);
+    let pick = this.random() * total;
+    for (const [key, weight] of entries) {
+      pick -= Number(weight);
+      if (pick < 0) return key;
+    }
+    return entries.at(-1)?.[0] || fallbackKey;
+  }
+
+  drawWeightedCount(weights = {}, fallback = 1) {
+    const key = this.drawWeightedKey(weights, String(fallback));
+    const count = Math.floor(Number(key));
+    return Number.isFinite(count) && count > 0 ? count : fallback;
+  }
+
+  getCoinValue(coinType, betSize = 1) {
+    const base = Number(serverConfig.coinTypeValue?.[String(coinType)] || 0);
+    return asMoney(base * Number(betSize));
+  }
+
+  pickStompReels() {
+    const cfg = this.getStompConfig();
+    let size;
+    if (isObject(cfg.stompReelSize)) {
+      size = this.drawWeightedCount(cfg.stompReelSize, 2);
+    } else {
+      const min = Math.max(1, Math.floor(Number(cfg.stompReelSizeMin) || 2));
+      const max = Math.min(this.width, Math.max(min, Math.floor(Number(cfg.stompReelSizeMax) || 3)));
+      size = min + Math.floor(this.random() * (max - min + 1));
+    }
+    size = Math.max(1, Math.min(this.width, size));
+    const start = Math.floor(this.random() * (this.width - size + 1));
+    return Array.from({ length: size }, (_, index) => start + index);
+  }
+
+  resolveStompFeature(board, { forceStomp = false, allowNatural = false, betSize = 1 } = {}) {
+    if (!forceStomp && !allowNatural) return null;
+    const cfg = this.getStompConfig();
+    const triggered = forceStomp || this.random() < Number(cfg.odds || 0);
+    if (!triggered) return null;
+
+    const reels = this.pickStompReels();
+    const animalSymbols = new Set(
+      Array.isArray(serverConfig.animalSymbols) ? serverConfig.animalSymbols.map(Number) : [1, 2, 3, 4, 5]
+    );
+    const crushedCells = [];
+    const nextBoard = clone(board);
+
+    reels.forEach((reel) => {
+      for (let row = 0; row < this.height; row += 1) {
+        const symbol = Number(nextBoard[reel][row]);
+        if (symbol <= 0) continue;
+        const isAnimal = animalSymbols.has(symbol);
+        const coinType = isAnimal ? this.drawCoinType() : null;
+        crushedCells.push({
+          reel,
+          row,
+          symbol,
+          isAnimal,
+          coinType,
+          coinValue: coinType ? this.getCoinValue(coinType, betSize) : null
+        });
+        nextBoard[reel][row] = 0;
+      }
+    });
+
+    const coinWin = crushedCells
+      .filter((cell) => cell.isAnimal && Number(cell.coinValue) > 0)
+      .reduce((sum, cell) => asTbm(sum + Number(cell.coinValue)), 0);
+
+    return {
+      board: nextBoard,
+      stompEvent: {
+        triggered: true,
+        reels,
+        crushedCells,
+        reelsBeforeStomp: clone(board),
+        coinWin,
+        teaseMs: 900,
+        pauseMs: 450
+      }
+    };
+  }
+
+  resolveCrushFeature(board, { forceCrush = false, allowNatural = false } = {}) {
+    if (!forceCrush && !allowNatural) return null;
+    const cfg = this.getCrushConfig();
+    const triggered = forceCrush || this.random() < Number(cfg.odds || 0);
+    if (!triggered) return null;
+
+    const animals = this.findAnimalPositions(board);
+    if (!animals.length) return null;
+
+    const crushAmount = isObject(cfg.crushAmount)
+      ? this.drawWeightedCount(cfg.crushAmount, 1)
+      : 1;
+    const pool = [...animals];
+    const crushedCells = [];
+    const nextBoard = clone(board);
+    const picks = Math.min(crushAmount, pool.length);
+
+    for (let index = 0; index < picks; index += 1) {
+      const pickIndex = Math.floor(this.random() * pool.length);
+      const target = pool.splice(pickIndex, 1)[0];
+      crushedCells.push({
+        reel: target.reel,
+        row: target.row,
+        symbol: target.symbol,
+        isAnimal: true,
+      });
+      nextBoard[target.reel][target.row] = 0;
+    }
+
+    return {
+      board: nextBoard,
+      crushEvent: {
+        triggered: true,
+        crushedCells,
+        crushCount: crushedCells.length,
+        reelsBeforeCrush: clone(board),
+        teaseMs: 700,
+        pauseMs: 350,
+      },
+    };
+  }
+
+  scatterPositionKey({ reel, row }) {
+    return `${reel},${row}`;
+  }
+
+  collectScatterCandidates(board, gravityResult, consumedScatterKeys) {
+    const positions = gravityResult
+      ? gravityResult.newPositions.filter(({ symbol }) => symbol === serverConfig.scatterSymbol)
+      : this.findScatterPositions(board);
+    return positions.filter((position) => !consumedScatterKeys.has(this.scatterPositionKey(position)));
+  }
+
   consumeScatterLandings(positions, tracker, { isBonus = false } = {}) {
     return positions.map((position) => {
       const angerBefore = tracker.anger;
       const counted = !isBonus && !tracker.triggered && tracker.anger < serverConfig.anger.maximum;
-      if (counted) tracker.anger += 1;
+      if (counted) {
+        tracker.anger += 1;
+        tracker.consumedScatterKeys.add(this.scatterPositionKey(position));
+      }
       const triggeredBonus = counted && tracker.anger >= serverConfig.anger.maximum;
       if (triggeredBonus) {
         tracker.triggered = true;
@@ -305,7 +505,9 @@ export class GameServer {
     roundMeta,
     isBonus,
     bonusRemaining,
-    bonusTriggeredThisAction
+    bonusTriggeredThisAction,
+    stompEvent = null,
+    crushEvent = null
   }) {
     return {
       ...clone(serverConfig.gameState),
@@ -343,6 +545,8 @@ export class GameServer {
         triggered: bonusTriggeredThisAction,
         ignoredLandings: scatterLandings.filter((landing) => !landing.counted).length
       },
+      stompEvent: stompEvent ? clone(stompEvent) : null,
+      crushEvent: crushEvent ? clone(crushEvent) : null,
       roundMeta: clone(roundMeta)
     };
   }
@@ -359,7 +563,11 @@ export class GameServer {
     betSize,
     roundMeta,
     isBonus,
-    bonusRemaining
+    bonusRemaining,
+    forceStomp = false,
+    allowNaturalStomp = false,
+    forceCrush = false,
+    allowNaturalCrush = false
   }) {
     let board = clone(initialBoard);
     let action = initialAction;
@@ -367,12 +575,34 @@ export class GameServer {
     let gravityResult = null;
 
     for (let cascade = 0; cascade <= serverConfig.maxCascadesPerSpin; cascade += 1) {
+      let stompEvent = null;
+      let crushEvent = null;
+      if (cascade === 0 && initialAction === "spin" && !isBonus) {
+        const stompResult = this.resolveStompFeature(board, {
+          forceStomp,
+          allowNatural: allowNaturalStomp,
+          betSize
+        });
+        if (stompResult) {
+          board = stompResult.board;
+          stompEvent = stompResult.stompEvent;
+          totals.twa = asTbm(totals.twa + Number(stompEvent.coinWin || 0));
+        } else {
+          const crushResult = this.resolveCrushFeature(board, {
+            forceCrush,
+            allowNatural: allowNaturalCrush
+          });
+          if (crushResult) {
+            board = crushResult.board;
+            crushEvent = crushResult.crushEvent;
+          }
+        }
+      }
+
       const result = this.evaluateWays(board, betSize);
       totals.twa = asTbm(totals.twa + result.winAmount);
       totals.tbm = asTbm(totals.tbm + result.tbm);
-      const scatterCandidates = gravityResult
-        ? gravityResult.newPositions.filter(({ symbol }) => symbol === serverConfig.scatterSymbol)
-        : this.findScatterPositions(board);
+      const scatterCandidates = this.collectScatterCandidates(board, gravityResult, tracker.consumedScatterKeys);
       const wasTriggered = tracker.triggered;
       const scatterLandings = this.consumeScatterLandings(scatterCandidates, tracker, { isBonus });
       const triggeredNow = !wasTriggered && tracker.triggered;
@@ -398,7 +628,9 @@ export class GameServer {
         roundMeta,
         isBonus,
         bonusRemaining,
-        bonusTriggeredThisAction: triggeredNow
+        bonusTriggeredThisAction: triggeredNow,
+        stompEvent,
+        crushEvent
       }));
 
       if (!result.hasWins) return nextAction;
@@ -417,17 +649,17 @@ export class GameServer {
     return nextWhenDone;
   }
 
-  async generateRoundStates({ betSize = 1, ticketStrategy, fakeNoWins = false } = {}) {
+  generateRoundStatesOnce({ betSize, ticketStrategy, fakeNoWins = false } = {}) {
     const normalizedBet = Number(betSize);
-    if (!Number.isFinite(normalizedBet) || normalizedBet <= 0) {
-      throw new Error("betSize must be a positive number");
-    }
-
     const forced = this.resolveForcedOutcomeSelection(ticketStrategy);
     const strategy = this.resolveTicketStrategy(forced?.strategy || ticketStrategy);
     const ticket = fakeNoWins ? "noWin" : (forced?.ticket || this.drawWeightedTicket(strategy));
     const roundMeta = this.buildRoundMeta({ betSize: normalizedBet, ticketStrategy: strategy, ticket });
-    const tracker = { anger: this.anger, triggered: false };
+    const forceStomp = ticket === "stompEntry";
+    const allowNaturalStomp = ticket === "random";
+    const forceCrush = ticket === "crushEntry";
+    const allowNaturalCrush = ticket === "random";
+    const tracker = { anger: 0, triggered: false, consumedScatterKeys: new Set() };
     const totals = { twa: 0, tbm: 0 };
     const roundStates = [];
 
@@ -449,7 +681,11 @@ export class GameServer {
       betSize: normalizedBet,
       roundMeta,
       isBonus: false,
-      bonusRemaining: 0
+      bonusRemaining: 0,
+      forceStomp,
+      allowNaturalStomp,
+      forceCrush,
+      allowNaturalCrush
     });
 
     if (paidNext === "bonustransition") {
@@ -517,10 +753,44 @@ export class GameServer {
     };
     if (fakeNoWins) {
       finalState.simulationFakeNoWin = true;
-    } else {
-      this.anger = tracker.anger;
     }
     return roundStates;
+  }
+
+  hasStomp(roundStates) {
+    return roundStates.some((state) => state.stompEvent?.triggered);
+  }
+
+  hasCrush(roundStates) {
+    return roundStates.some((state) => state.crushEvent?.triggered);
+  }
+
+  async generateRoundStates({ betSize = 1, ticketStrategy, fakeNoWins = false, huntStompFeature = false } = {}) {
+    const normalizedBet = Number(betSize);
+    if (!Number.isFinite(normalizedBet) || normalizedBet <= 0) {
+      throw new Error("betSize must be a positive number");
+    }
+
+    if (huntStompFeature) {
+      const maxAttempts = 100000;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const roundStates = this.generateRoundStatesOnce({
+          betSize: normalizedBet,
+          ticketStrategy,
+          fakeNoWins
+        });
+        if (this.hasStomp(roundStates)) {
+          return roundStates;
+        }
+      }
+      throw new Error("Could not find stomp feature outcome");
+    }
+
+    return this.generateRoundStatesOnce({
+      betSize: normalizedBet,
+      ticketStrategy,
+      fakeNoWins
+    });
   }
 
   hasBonus(roundStates) {
@@ -532,6 +802,8 @@ export class GameServer {
     if (ticket === "noWin") return totalTbm === 0;
     if (ticket === "waysWin") return totalTbm > 0;
     if (ticket === "bonusEntry") return this.hasBonus(roundStates);
+    if (ticket === "stompEntry") return this.hasStomp(roundStates);
+    if (ticket === "crushEntry") return this.hasCrush(roundStates);
     return false;
   }
 }

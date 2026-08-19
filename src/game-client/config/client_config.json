@@ -60,9 +60,9 @@
       "initial": 0
     }
   },
-  "payoutSymbols": [1, 2, 3, 4, 5, 6, 7],
+  "payoutSymbols": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   "symbolsMapping": {
-    "scatter": 8
+    "scatter": 13
   },
   "wincap": 5000
 }

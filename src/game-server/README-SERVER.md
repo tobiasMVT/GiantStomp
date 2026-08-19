@@ -28,19 +28,26 @@ Only newly landed Scatters count:
 - on cascades, only Scatter symbols in replacement movements are new;
 - existing Scatters moved by gravity are never counted again.
 
-`scatterLandings` records each landing and whether it counted. Anger lives on the
-`GameServer` instance, ranges from 0 to 3, and persists only after a returned paid
-round. At 3, bonus entry is latched, Anger resets to 0, and later Scatters in that
-round are ignored.
+`scatterLandings` records each landing and whether it counted. Anger ranges from 0 to 3
+within a single paid round. Each new round starts at 0. At 3, bonus entry is latched,
+Anger resets to 0, and later Scatters in that round are ignored.
 
-The HTTP wrapper owns one long-lived `GameServer`, so Anger also persists across HTTP
-round requests.
+The HTTP wrapper owns one long-lived `GameServer`, but Anger is not persisted across
+HTTP round requests.
 
 ## Bonus
 
 Bonus entry emits `bonustransition`, followed by exactly three `freespin` chains.
 Freespins use the same ways and cascade math. Scatters do not retrigger or alter
 Anger during the bonus. The final bonus action ends with `nextAction: "spin"`.
+
+## Giant Stomp
+
+On paid `spin` actions with the `random` ticket, the server may trigger a mystery
+stomp (`stompFeature.odds`). It crushes 2–3 consecutive reels, zeroes those cells,
+and emits `stompEvent` with `reelsBeforeStomp`, `crushedCells`, and coin types for
+animal symbols. Dev ticket `stompEntry` always forces the feature; `huntStompFeature`
+loops until a natural stomp is found.
 
 ## Ticket Strategies
 

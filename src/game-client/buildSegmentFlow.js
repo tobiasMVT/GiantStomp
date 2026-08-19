@@ -12,6 +12,11 @@ export function buildSegmentFlow({
   const wins = scene.getWinPositions(gameState);
   const hasWins = wins.length > 0;
   const hasScatters = Array.isArray(gameState.scatterLandings) && gameState.scatterLandings.length > 0;
+  const hasStomp = !!gameState.stompEvent?.triggered;
+  const hasCrush = !!gameState.crushEvent?.triggered;
+  const dropReels = gameState.stompEvent?.reelsBeforeStomp
+    || gameState.crushEvent?.reelsBeforeCrush
+    || gameState.reels;
   const skipVisual = () => scene.requestFastForward?.();
 
   return [
@@ -20,7 +25,7 @@ export function buildSegmentFlow({
       enabled: FULL_DROP_ACTIONS.has(action),
       run: async () => {
         await scene.slideOutOldSymbols();
-        await scene.dropSymbols(gameState.reels);
+        await scene.dropSymbols(dropReels);
       },
       onSkipAction: skipVisual,
     },
@@ -38,6 +43,18 @@ export function buildSegmentFlow({
       enabled: true,
       run: () => waitCancellable?.(120),
       onSkipAction: () => cancelActiveDelay?.(),
+    },
+    {
+      checkpoint: false,
+      enabled: hasStomp,
+      run: () => scene.presentStompFeature?.(gameState.stompEvent),
+      onSkipAction: skipVisual,
+    },
+    {
+      checkpoint: false,
+      enabled: hasCrush,
+      run: () => scene.presentCrushFeature?.(gameState.crushEvent),
+      onSkipAction: skipVisual,
     },
     {
       checkpoint: false,

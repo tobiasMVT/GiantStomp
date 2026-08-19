@@ -161,11 +161,13 @@ const server = http.createServer(async (req, res) => {
       const betSize = Number(body?.betSize);
       const normalizedBetSize = Number.isFinite(betSize) && betSize > 0 ? betSize : 1;
       const ticketStrategy = typeof body?.ticketStrategy === "string" ? body.ticketStrategy : undefined;
+      const huntStompFeature = body?.huntStompFeature === true || ticketStrategy === "stompEntry";
 
       const roundStates = await gameServer.generateRoundStates({
         betSize: normalizedBetSize,
         ticketStrategy,
-        fakeNoWins: body?.fakeNoWins === true
+        fakeNoWins: body?.fakeNoWins === true,
+        huntStompFeature
       });
 
       sendJson(res, 200, { roundStates });

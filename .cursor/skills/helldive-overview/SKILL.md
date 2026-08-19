@@ -11,13 +11,15 @@ The active prototype is a 5-reel by 3-row, 243-ways cascading slot. The old hous
 
 **Main game:** Spin → evaluate ways → explode all winning positions → downward respin → repeat until no win.
 
-Each newly landed scatter charges one of three Anger segments once. Full Anger resets and enters a temporary three-freespin bonus shell.
+Each newly landed scatter charges one of three Anger segments once within the same paid round (from `spin` through cascades until the next `spin`). Full Anger resets and enters a temporary three-freespin bonus shell.
 
 **Bonus:** Three freespins using the same 5x3 ways and cascade loop. Special bonus symbols and recharge rules are deferred.
 
 ## System Skills
 
 - `payways-cascade`: board contract, ways scoring, cascades, scatter consumption, Anger, and freespins.
+- `giant-stomp-feature`: mystery giant foot crush, coin drops, dev stompEntry hunt.
+- `crush-feature`: giant hand grab/squeeze on a random animal, dev crushEntry.
 - `client-architecture`: Client/GameScene presentation responsibility split.
 - `forced-outcome-dev-tool`: dev-only outcome selection.
 

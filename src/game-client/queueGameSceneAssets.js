@@ -4,11 +4,36 @@
  */
 export function queueGameSceneAssets(load, _deps = {}) {
   load.bitmapFont("uiBitmap", "assets/fonts/bitmap/gothic.png", "assets/fonts/bitmap/gothic.xml");
-  for (let symbolId = 1; symbolId <= 8; symbolId += 1) {
-    load.image(String(symbolId), `assets/helldive/symbols/${symbolId}.png`);
+  const giantStompSymbols = {
+    1: "assets/giantstomp/1_kanin.png",
+    2: "assets/giantstomp/2_ekorre.png",
+    3: "assets/giantstomp/3_bird.png",
+    4: "assets/giantstomp/4_igelkott.png",
+    5: "assets/giantstomp/5_mullvad.png",
+    6: "assets/giantstomp/6_A.png",
+    7: "assets/giantstomp/7_K.png",
+    8: "assets/giantstomp/8_Q.png",
+    9: "assets/giantstomp/9_J.png",
+    10: "assets/giantstomp/10_10.png",
+    13: "assets/helldive/symbols/8.png",
+  };
+  for (const symbolId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13]) {
+    const path = giantStompSymbols[symbolId] || `assets/helldive/symbols/${symbolId}.png`;
+    load.image(String(symbolId), path);
   }
 
-  load.image("main_background", "assets/helldive/backgrounds/heaven_city.png");
+  load.image("giantfoot", "assets/giantstomp/giantfoot.png");
+  load.image("open_hand", "assets/giantstomp/open_hand.png");
+  load.image("snapped_hand", "assets/giantstomp/snapped_hand.png");
+  load.multiatlas(
+    "yellow_coin",
+    "assets/giantstomp/yellow_coin/yellow_coin.json",
+    "assets/giantstomp/yellow_coin/"
+  );
+
+  load.image("main_background", "assets/giantstomp/stompy_background.png");
+  load.image("crush_giant_bg", "assets/giantstomp/giant_in_bg.png");
+  load.image("reel_frame", "assets/giantstomp/reel_frame.png");
   load.image("bonus_background", "assets/helldive/backgrounds/hell_bonus_floor.png");
 
   load.audio("action_spin_click", "assets/sounds/action_spin_click.opus");
