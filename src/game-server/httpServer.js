@@ -12,6 +12,7 @@ import {
 const DEFAULT_PORT = 8787;
 const portFromEnv = Number(process.env.PORT);
 const port = Number.isFinite(portFromEnv) && portFromEnv > 0 ? portFromEnv : DEFAULT_PORT;
+const gameServer = new GameServer();
 
 const toLabel = (id) =>
   String(id)
@@ -20,7 +21,6 @@ const toLabel = (id) =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const resolveTicketStrategies = () => {
-  const gameServer = new GameServer();
   const ids = gameServer.getAvailableTicketStrategies();
   return ids.map((id) => ({ id, label: toLabel(id) }));
 };
@@ -162,10 +162,10 @@ const server = http.createServer(async (req, res) => {
       const normalizedBetSize = Number.isFinite(betSize) && betSize > 0 ? betSize : 1;
       const ticketStrategy = typeof body?.ticketStrategy === "string" ? body.ticketStrategy : undefined;
 
-      const gameServer = new GameServer();
       const roundStates = await gameServer.generateRoundStates({
         betSize: normalizedBetSize,
-        ticketStrategy
+        ticketStrategy,
+        fakeNoWins: body?.fakeNoWins === true
       });
 
       sendJson(res, 200, { roundStates });

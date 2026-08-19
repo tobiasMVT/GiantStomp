@@ -1,37 +1,28 @@
-# GameScene Extraction Map
+# Payways Client Architecture
 
-`GameScene.js` is now a facade.
-
-`Client.js` and `buildSegmentFlow.js` still call scene methods on `GameScene`, but many method bodies now live in feature modules under this folder and are assigned back onto `GameScene.prototype`.
+The previous feature-module facade has been removed. `GameScene.js` is now a compact, self-contained 5×3 renderer.
 
 ## Flow
 
-`Client.js` -> `GameScene` facade -> extracted feature module method -> shared scene state / Phaser objects
+`server state → Client.reactOnResponse → buildSegmentFlow → SegmentFlowRunner → GameScene`
 
-## Main Boundaries
+## Action mapping
 
-- `gameSceneAudioTimingMethods.js`: fast-forward, waits, SFX, music, sound-volume tool, pause / slow-mo helpers
-- `gameSceneHeavenHellMethods.js`: Heaven/Hell background, portal, angel, loot ground, collect phase, kill meter, ability panel
-- `gameSceneBonusMysteryMethods.js`: mystery feature symbol visuals, meter UI, release / collection handling
-- `gameSceneLightningBeeMethods.js`: bee symbol visuals, bee meter, movement / charge FX, collection handling
-- `gameSceneMergeGunMethods.js`: merge-gun symbols, area visuals, held gun flow, activation sequence
-- `gameSceneFreespinUiMethods.js`: freespin counter and ring presentation
-- `gameSceneLayoutMethods.js`: event bus, layout bounds, layout debug emits
+- `spin`: leave bonus if needed, reset win, slide old board out, full-board drop
+- `respin`: apply downward `dropEvent.movements`
+- `bonustransition`: crossfade bonus background/theme and initialize the freespin counter
+- `freespin`: update counter, full-board drop using the shared flow
+- `freerespin`: update counter, cascade using the shared flow
 
-## Shared State Still Owned By GameScene
+All board actions then use the same optional scatter/Anger presentation, reveal checkpoint, ways-win highlight, explosion, and count-up.
 
-- Board state: `reelSprites`
-- Hero state: `heroSprite`, `currentHeroFootprintSize`, `currentHeroAnchor`, `currentHeroTextureKey`
-- Bonus state: `isInBonusMode`, `currentAction`, `currentBonusStage`
-- Feature state: mystery meter, bee meter, merge-gun areas, Heaven/Hell meter runtime
-- Audio / skip state: fast-forward flags, tracked sounds, sound-volume tool state
+## Scene state
 
-## Small Boundary Cleanup
+- `reelSprites[reel][row]`: canonical visible board sprites
+- `angerMeterState`: current server meter projection
+- `freespinCounterValue`: framework and local counter value
+- `isInBonusMode`: background/music mode only
+- `presentationWaits` / `activeTweens`: fast-forward cleanup
+- `layoutSnapshot`: responsive camera projection supplied by the framework
 
-`Client.js` no longer writes these scene fields directly:
-
-- `currentAction`
-- `currentHeroFootprintSize`
-- `lightningCount`
-
-It now goes through scene setters on the facade instead.
+No house, Angel, demon combat, loot, chest, portal, mystery, bee, merge-gun, or collect-phase presentation remains in the client code.

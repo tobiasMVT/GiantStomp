@@ -1,34 +1,25 @@
 ---
 name: helldive-overview
-description: HellDive game design overview — cluster slot plus Angel combat, Hell bonus, Collect Phase. Use when starting HellDive work, planning features, or unsure which subsystem applies.
+description: Current game overview for the 5x3 cascading 243-ways prototype. Use when starting game-specific work or deciding which subsystem owns reel math, cascades, Anger, or bonus flow.
 ---
 
-# HellDive Overview
+# Game Overview
 
-Cluster-pay slot with an action-combat layer. Demons appear on the board; after normal win resolution the Angel attacks survivors.
+The active prototype is a 5-reel by 3-row, 243-ways cascading slot. The old house, Angel combat, demons, loot, and feature-heavy Hell bonus no longer belong to the active design.
 
 ## Core Loop
 
-**Main game:** Spin → cluster wins → explode/redrop → repeat → combat (Angel vs surviving demons) → Wild recalc wins.
+**Main game:** Spin → evaluate ways → explode all winning positions → downward respin → repeat until no win.
 
-**Bonus (Hell):** No cluster wins. Focus: demon kills, loot, multipliers, ability unlocks. Loot paid only at **Collect Phase** end.
+Each newly landed scatter charges one of three Anger segments once. Full Anger resets and enters a temporary three-freespin bonus shell.
 
-## Systems (see dedicated skills)
+**Bonus:** Three freespins using the same 5x3 ways and cascade loop. Special bonus symbols and recharge rules are deferred.
 
-| System | Skill | Key fact |
-|--------|-------|----------|
-| Client layering | `client-architecture` | Client = flow; GameScene = presentation |
-| Angel position | `angel-system` | Persistent board position; counts as Wild |
-| Combat | `combat-system` | Closest demon first; demons never attack back |
-| Gargoyle | `gargoyle-system` | Hell-bonus gargoyles can flee between attacks when nearby demons die |
-| Loot | `loot-system` | Visible on board until Collect Phase |
-| Abilities | `ability-system` | Unlocked in bonus; all config in `server_config.json` |
-| Pentagram | `pentagram-system` | Bonus-only overlay hit by Divine Strike / Divine X, upgrades center multiplier on completion |
-| Retrigger / kill meter | `retrigger-system` | Meter overflows during hunt; settles at end of battle when board is clear |
+## System Skills
 
-## Design Targets
-
-Fast combat. Persistent Angel position. Strong visual progression. Action-RPG feel on slot math.
+- `payways-cascade`: board contract, ways scoring, cascades, scatter consumption, Anger, and freespins.
+- `client-architecture`: Client/GameScene presentation responsibility split.
+- `forced-outcome-dev-tool`: dev-only outcome selection.
 
 ## Code Locations
 
@@ -38,6 +29,6 @@ Fast combat. Persistent Angel position. Strong visual progression. Action-RPG fe
 | Presentation | `src/game-client/GameScene.js` |
 | Math / state | `src/game-server/` |
 | Client config | `src/game-client/config/client_config.json` |
-| Server config | `server_config.json` (abilities, loot tables) |
+| Server config | `src/game-server/server_config.json` |
 
 Human docs: `src/game-client/README-CLIENT.md`, `src/game-server/README-SERVER.md`, `GAME_SUMMARY.md`.

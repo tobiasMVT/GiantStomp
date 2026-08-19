@@ -1,4 +1,4 @@
-# HellDive Agent Guide
+# Payways Prototype Agent Guide
 
 ## Edit Scope
 
@@ -11,17 +11,14 @@ Read access is allowed anywhere.
 
 ## Domain Knowledge
 
-Read `.cursor/skills/` for HellDive design and architecture. Start with `helldive-overview`, then open the system-specific skill as needed.
+Read `.cursor/skills/` for the current design and architecture. Start with `helldive-overview`, then open the system-specific skill as needed.
 
 | Skill | When |
 |-------|------|
 | `helldive-overview` | New task, unsure where to look |
 | `client-architecture` | Client.js, GameScene.js, segment flow |
-| `combat-system` | Post-win combat, demon kills |
-| `angel-system` | Angel position, Wild mechanic |
-| `loot-system` | Drops, Collect Phase payout |
-| `ability-system` | Portal, Divine Charge, Divine Wrath |
-| `retrigger-system` | Kill meter, end-of-battle retrigger +2 FS, ability unlock settlement |
+| `payways-cascade` | 5x3 ways math, cascades, scatter consumption, Anger meter, freespins |
+| `forced-outcome-dev-tool` | Dev-only forced round outcomes |
 
 Also read `.md` files in `game-server` and `game-client`, and `GAME_SUMMARY.md` for prototype context.
 

@@ -13,9 +13,9 @@ const flowInteractionPolicy = {
   fastForwardCooldownMs: 0,
 
   // Action names that should STOP auto-continuation inside one spin round.
-  // This is usually one or two actions (e.g. freespin entry, pick option).
+  // Pause once before the first freespin so the transition can settle.
   // If nextAction is not listed here, controller continues automatically.
-  stopContinuedActions: ["freespin", "pickoption"]
+  stopContinuedActions: ["freespin"]
 };
 
 export default flowInteractionPolicy;
