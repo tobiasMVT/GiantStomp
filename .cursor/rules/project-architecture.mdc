@@ -1,0 +1,152 @@
+---
+description: Core architecture, boot flow, and conventions for this Phaser 3 slot game template
+alwaysApply: true
+---
+
+# Project Architecture
+
+Phaser 3 cluster-pay slot game built with **Vite** (ESM). React only provides a mount div — all game logic is framework-agnostic plain JS.
+
+## Folder Structure
+
+```
+src/
+  core/          -- FRAMEWORK (reusable, never changes per game)
+  components/    -- Framework scenes / React shell (App.js, UIScene.js)
+  flow/          -- Framework flow runner (SegmentFlowRunner.js)
+  game-client/   -- GAME-SPECIFIC CLIENT (copy-paste per game)
+    assets/      -- Game-specific static assets (symbols, sounds, shaders)
+    config/      -- client_config.json, layoutMetrics, policies, gameClientConfig
+    GameScene.js -- Game rendering
+    Client.js    -- Connects game logic to Phaser scene
+    buildSegmentFlow.js -- Game-specific animation flow
+  game-server/   -- SERVER / MATH ENGINE (separate entity)
+    Gameserver.js
+public/          -- Truly static files (manifest.json, robots.txt)
+index.html       -- Vite entry (project root)
+vite.config.js   -- Vite config with gameClientAssetsPlugin (serves game-client/assets at /assets/)
+```
+
+### Game Assets
+
+Assets live inside `src/game-client/assets/` so they ship with the game client folder.
+A custom Vite plugin (`gameClientAssetsPlugin` in `vite.config.js`) serves them at `/assets/` during dev
+and copies them into `dist/assets/` on build. Phaser `this.load.*` calls still use `"assets/..."` paths.
+
+## Core Classes & Responsibilities
+
+| Class | File | Role |
+|---|---|---|
+| **GameController** | `src/core/GameController.js` | Decision gateway. Owns round orchestration, session init, bet levels, balance, interaction policy, message queue. |
+| **GameRuntime** | `src/core/GameRuntime.js` | Bridge between EventBus, Controller, and Phaser scenes. Subscribes to intents, projects state to UI. |
+| **SessionService** | `src/core/SessionService.js` | Async session API (currently a mock). Returns `{ session, settings }`. Will be a real HTTP client in production. |
+| **GameStateStore** | `src/core/GameStateStore.js` | Canonical game/client state with subscriber notifications. |
+| **LayoutManager** | `src/core/LayoutManager.js` | Computes safe areas, game rect, UI scale from viewport + device insets. |
+| **EventBus** | `src/core/EventBus.js` | Pub/sub for decoupled communication between runtime, controller, and scenes. |
+| **controllerSingleton** | `src/core/controllerSingleton.js` | Composition root — creates and wires all singletons. |
+
+## Boot Flow (Session-Driven)
+
+```
+App.js
+  → new GameRuntime(controller, eventBus, stateStore, layoutManager)
+  → runtime.init()  (registers intent listeners + state subscriber)
+  → createPhaserGame()
+    → Phaser creates GameScene + UIScene
+    → UIScene.create() sets up camera (transparent) + event listeners, NO buttons yet
+    → onReady callback → runtime.attachScenes({ gameScene, uiScene })
+      → wires eventBus on both scenes
+      → await controller.initSession()  (calls SessionService.getSession())
+      → uiScene.configureUI(settings)   (builds buttons dynamically)
+      → publishUIState()
+```
+
+## Settings Flow
+
+`SessionService.getSession()` returns settings consumed by the whole stack:
+
+```js
+{
+  betLevels: [0.1, 0.5, 1, 2, 5, 10, 25, 50, 75, 100],
+  defaultBetIndex: 2,
+  autoplay: { allowed: true },
+  quickStopAllowed: true,  // regulator-controlled, applied to flowInteractionPolicy
+  spinDelayTimer: 0,       // ms minimum wait between round-end and next spin
+  balance: 1000
+}
+```
+
+- **GameController** stores settings, exposes `getSettings()`, `getBetLevels()`, `getNextBet(current)`
+- **GameRuntime** reads settings for spin delay enforcement and autoplay gating
+- **UIScene.configureUI(settings)** builds buttons conditionally (e.g. no autoplay button if `!settings.autoplay.allowed`)
+
+## UIScene Button System
+
+Buttons are created via `createButton(label, onClick, enabled, role)` with three roles:
+- **primary**: Spin button (gold border, 160×52)
+- **secondary**: Autoplay, Bet (subtle border, 120×44)
+- **utility**: Paytable, Sound, Layout Debug (minimal, 72×42)
+
+All buttons live in a semi-transparent bottom bar. UIScene camera is transparent so GameScene background shows through.
+
+## Message Queue System
+
+The GameController owns a message queue for external messages (operator notices, reality checks, player messages, errors). Messages can be injected at any time but only block UI interaction at round boundaries.
+
+### How it works
+
+1. External systems (or debug buttons) call `controller.enqueueMessage({ type, title, body, actions })`.
+2. When a round ends, `handleRoundEnded()` checks `hasMessages()` before enabling `spinState`/`betSwap`. If messages are queued, buttons stay disabled.
+3. The runtime's `handleRenderRoundEnded()` detects pending messages and calls `drainMessageQueue()`.
+4. `drainMessageQueue()` loops: peek message -> `await uiScene.showDialog(msg)` -> dequeue -> repeat until empty.
+5. After the queue is drained, the runtime sets `spinState: true, betSwap: true` and publishes UI state.
+
+### Message shape
+
+```js
+{ id: "msg-1", type: "realityCheck"|"playerMessage"|"error", title: "...", body: "...", actions: ["Yes","No"] }
+```
+
+### Controller queue API
+
+| Method | Purpose |
+|---|---|
+| `enqueueMessage(msg)` | Push message, auto-generates `id` if missing |
+| `peekMessage()` | Returns first message without removing (or `null`) |
+| `dequeueMessage()` | Removes and returns first message |
+| `hasMessages()` | Returns `true` if queue is non-empty |
+
+### UIScene dialog
+
+`showDialog(msg)` returns `Promise<string>` resolving to the clicked button label. Renders a full-screen overlay with a centered panel, title, body, and action buttons. `destroyDialog()` cleans up.
+
+### Debug injection
+
+Two debug buttons ("RC", "MSG") in the top-right emit `intent:injectRealityCheck` and `intent:injectPlayerMessage`. The runtime listens for these and calls `controller.enqueueMessage(...)`.
+
+### Autoplay guard
+
+`maybeTriggerAutoplay()` bails out when `controller.hasMessages()` is true, preventing autospins while messages are pending.
+
+## Key EventBus Events
+
+| Event | Direction | Purpose |
+|---|---|---|
+| `intent:spinRequested` | UI → Runtime | Player wants to spin |
+| `intent:betChangeRequested` | UI → Runtime | Cycle to next bet level |
+| `intent:autoplayToggled` | UI → Runtime | Toggle autoplay on/off |
+| `intent:fastForwardRequested` | UI → Runtime | Quick-stop / skip |
+| `ui:viewModel` | Runtime → UI | Push full UI state snapshot |
+| `layout:changed` | Runtime → Scenes | New layout snapshot after resize |
+| `render:roundStarted` | GameScene → Runtime | Round animation began |
+| `render:roundEnded` | GameScene → Runtime | Round animation finished |
+| `layout:contentBoundsChanged` | GameScene → Runtime | mustSeeBounds updated |
+| `intent:injectRealityCheck` | UI → Runtime | Debug: inject a reality check message into queue |
+| `intent:injectPlayerMessage` | UI → Runtime | Debug: inject a player message into queue |
+
+## Game Config
+
+`src/game-client/config/client_config.json` holds static game math config (paytable, grid size, symbol weights) and client-only presentation toggles (e.g. bonus grid symbol base-TBM overlays).
+`defaultGameSettings in SessionService.js` is the mock data source for SessionService.
+`src/game-client/config/flowInteractionPolicy.js` has game-tuning knobs (skip, ff delay/cooldown, stopContinuedActions). `quickStopAllowed` comes from session settings, not this file.
+`src/game-client/config/gameClientConfig.js` holds game-specific UI overrides (colors, game name) consumed by UIScene.

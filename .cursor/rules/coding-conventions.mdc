@@ -1,0 +1,43 @@
+---
+description: Coding conventions and patterns used in this codebase
+alwaysApply: true
+---
+
+# Coding Conventions
+
+## Architecture Patterns
+
+- **No React state for game logic** — React only provides the mount div. All state lives in `GameStateStore`.
+- **Singleton composition root** — `controllerSingleton.js` wires everything. Don't create duplicate instances.
+- **EventBus for decoupling** — Scenes and runtime communicate via events, never direct method calls across layers (except `configureUI` which is a one-time setup call).
+- **Controller = decision gateway** — All gameplay decisions (can spin? which bet?) go through `GameController`. Scenes are renderers, not decision-makers.
+
+## State Management
+
+- `GameStateStore` has two slices: `gameState` (server-side math state) and `clientState` (UI-facing state like balance, betSize, spinState).
+- Mutations use updater functions: `setClientState((prev) => ({ ...prev, key: value }))`.
+- Subscribers get `(nextSnapshot, prevSnapshot)` — use for diffing.
+
+## UIScene Conventions
+
+- UIScene starts empty — buttons are only created after `configureUI(settings)` is called by the runtime.
+- All UI elements are stored in `this.controls` object. `destroyUI()` iterates and destroys them all.
+- `layoutUI()` must guard with `if (!this.controls.spinButton) return;` since it fires on resize before UI is built.
+- Optional buttons (autoplay) must be guarded with `if (this.controls.autoplayButton)` everywhere.
+
+## GameScene Conventions
+
+- GameScene owns the Phaser camera viewport, background, and all symbol sprites.
+- `mustSeeBounds` defines the world-space rect the camera must show. LayoutManager computes zoom/scroll from it.
+- Symbol sprites are tracked in `this.reelSprites[reel][row]` 2D array.
+- Sound is played via `playSfxWithPolicy(key, config)` which respects fast-forward policy.
+
+## File Organization
+
+```
+src/
+  core/           — Framework-agnostic game logic (controller, runtime, state, services)
+  components/     — Phaser scenes (GameScene, UIScene) and React App shell
+  classes/        — Client adapter, GameServer (local math engine)
+  gameSpecific/   — Game-specific config (layout metrics, settings, policies)
+```
