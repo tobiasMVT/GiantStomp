@@ -28,18 +28,41 @@ Only newly landed Scatters count:
 - on cascades, only Scatter symbols in replacement movements are new;
 - existing Scatters moved by gravity are never counted again.
 
-`scatterLandings` records each landing and whether it counted. Anger ranges from 0 to 3
-within a single paid round. Each new round starts at 0. At 3, bonus entry is latched,
-Anger resets to 0, and later Scatters in that round are ignored.
+`scatterLandings` are still emitted for presentation, but they no longer charge Anger.
 
-The HTTP wrapper owns one long-lived `GameServer`, but Anger is not persisted across
-HTTP round requests.
+Bonus entry now rolls from crushed animals on paid spins. Each animal increments the
+round kill count. After the stomp/crush resolves, the server rolls `bonusTriggerOdds`
+using the capped kill count (`0`→`6` in config). The client fakes a 10-step Anger
+meter: each kill can tick it using `angerMeterTickOdds`, but the display caps at step
+9 until bonus actually triggers, when step 10 is shown and the round latches bonus.
+Once bonus is latched, cascades stop immediately.
 
-## Bonus
+## Bonus cash game
 
-Bonus entry emits `bonustransition`, followed by exactly three `freespin` chains.
-Freespins use the same ways and cascade math. Scatters do not retrigger or alter
-Anger during the bonus. The final bonus action ends with `nextAction: "spin"`.
+Bonus entry emits `bonustransition`, then `freespin` actions containing independently
+spun cash boards. A spin spends one of three lives. Any non-empty bonus symbol
+(`111`–`1000`) restores all three lives; symbol `0` is empty. Bonus values build
+unscaled `trapMeter.power` but do not enter `twa` until the post-bonus ouch stomp resolves.
+The bonus ends after three consecutive empty spins.
+
+When the bonus ends, `resolveOuchStomp()` runs on the final trap power and damage wheel.
+Step 1 always consumes the leftmost remaining segment; each extra step rolls against
+`damageMultilpierStepOdds` (default `0.66`). Win per step is `trapPower × segment value`;
+the credited win is the **last** step's `winAmount`, attached as `ouchStompEvent` on the
+final bonus `freespin` state and added to `twa`.
+
+A spin reports `bonusState.livesBeforeSpin` and `livesAfterSpend` alongside the
+post-spin `livesRemaining`, so the client can show the spent life without revealing
+whether the spin resets it.
+
+Trap symbols `666`, `777`, `888`, and `999` increment separate four-light collections.
+Their displayed power is awarded once, when the fourth light lands, and that trap's
+progress then resets to zero so it can be collected again. Landings carry
+`trapLightsFilled` (lights shown before the reset) and `completedTrap`. Symbol `1000` is
+a damage multiplier: it removes the lowest remaining value from `damageWheelSegments`
+instead of using sockets. Symbols `111`–`555` add power immediately. Bonus states
+expose `bonusLandings`, `bonusState`, `trapMeter`, and `damageWheel`; bonus spins have
+no ways or cascades. `bonus.maxSpins` is a defensive termination cap.
 
 ## Giant Stomp
 
@@ -54,7 +77,7 @@ loops until a natural stomp is found.
 - `normal`: natural weighted-symbol board generation.
 - `noWin`: a paid spin without a ways payout.
 - `waysWin`: a paid spin containing a ways win.
-- `bonusEntry`: a paid spin that supplies enough Scatters to enter the bonus.
+- `bonusEntry`: a paid spin that forces crushed animals and guaranteed bonus entry.
 
 The forced-outcome development endpoints remain compatible with these strategy and
 ticket names.

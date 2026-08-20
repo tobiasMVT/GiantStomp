@@ -21,6 +21,34 @@ export function queueGameSceneAssets(load, _deps = {}) {
     const path = giantStompSymbols[symbolId] || `assets/helldive/symbols/${symbolId}.png`;
     load.image(String(symbolId), path);
   }
+  const animalDollSymbols = {
+    1: "1_kanin_doll.png",
+    2: "2_ekorre_doll.png",
+    3: "3_bird_doll.png",
+    4: "4_igelkott_doll.png",
+    5: "5_mullvad_doll.png",
+  };
+  Object.entries(animalDollSymbols).forEach(([symbolId, filename]) => {
+    load.image(`${symbolId}_doll`, `assets/giantstomp/bonus symbol/${filename}`);
+  });
+  const bonusSymbols = {
+    111: "111_wood.png",
+    222: "222_rope.png",
+    333: "333_metal.png",
+    444: "444_spikes.png",
+    555: "555_gear.png",
+    666: "666_trap_tier1.png",
+    777: "777_trap_tier2.png",
+    888: "888_trap_tier3.png",
+    999: "999_trap_tier4.png",
+    1000: "1000_damage.png",
+  };
+  Object.entries(bonusSymbols).forEach(([symbolId, filename]) => {
+    load.image(String(symbolId), `assets/giantstomp/bonus symbol/${filename}`);
+  });
+  for (let lives = 1; lives <= 3; lives += 1) {
+    load.image(`bonus_life_${lives}`, `assets/giantstomp/bonus symbol/life${lives}.png`);
+  }
 
   load.image("giantfoot", "assets/giantstomp/giantfoot.png");
   load.image("open_hand", "assets/giantstomp/open_hand.png");
@@ -34,7 +62,9 @@ export function queueGameSceneAssets(load, _deps = {}) {
   load.image("main_background", "assets/giantstomp/stompy_background.png");
   load.image("crush_giant_bg", "assets/giantstomp/giant_in_bg.png");
   load.image("reel_frame", "assets/giantstomp/reel_frame.png");
-  load.image("bonus_background", "assets/helldive/backgrounds/hell_bonus_floor.png");
+  load.image("bonus_background", "assets/giantstomp/background_bonus.png");
+  load.image("ouch_background", "assets/giantstomp/ouch_background.png");
+  load.image("total_win_background", "assets/giantstomp/stompy_background_totalwin.png");
 
   load.audio("action_spin_click", "assets/sounds/action_spin_click.opus");
   load.audio("wins_highlight", "assets/sounds/wins_highlight.opus");
@@ -43,6 +73,28 @@ export function queueGameSceneAssets(load, _deps = {}) {
   for (let reel = 1; reel <= 5; reel += 1) {
     load.audio(`land${reel}`, `assets/sounds/land${reel}.opus`);
   }
-  load.audio("theme_main", "assets/sounds/helldive/maingame.mp3");
-  load.audio("theme_bonus", "assets/sounds/helldive/bonusgame.mp3");
+  load.audio("theme_main", "assets/giantstomp/sounds/main-game-background-music.mp3");
+  load.audio("theme_bonus", "assets/giantstomp/sounds/bonus-background-music.mp3");
+  load.audio("giant_stomp", "assets/giantstomp/sounds/giant-stomping-sfx.mp3");
+  load.audio("construction_1", "assets/giantstomp/sounds/game-construction-sound-1.mp3");
+  load.audio("construction_2", "assets/giantstomp/sounds/game-construction-sound-2.mp3");
+  load.audio("construction_3", "assets/giantstomp/sounds/game-construction-sound-3.mp3");
+  load.audio(
+    "animal_crush_splatter",
+    "assets/giantstomp/sounds/splatter-body-falling-apart-messy-splatter-blood-gore-aegersum.mp3"
+  );
+  load.audio(
+    "animal_crush_gore",
+    "assets/giantstomp/sounds/very-loud-eviscerating-bleeding-eviscerating-guts-blood-gore-deleted-user.mp3"
+  );
+  load.audio("giant_laugh", "assets/giantstomp/sounds/laugh.mp3");
+  load.audio("ouch_stomp1", "assets/giantstomp/sounds/ouch_stomp1.mp3");
+  load.audio("ouch_stomp2", "assets/giantstomp/sounds/ouch_stomp2.mp3");
+  load.audio("ouch_background-music", "assets/giantstomp/sounds/ouch_background-music.mp3");
+  load.audio("giant_pain_scream", "assets/giantstomp/sounds/giant_pain_scream.mp3");
+  load.audio("giant_pain_scream2", "assets/giantstomp/sounds/giant_pain_scream2.mp3");
+  load.audio(
+    "ouch_celebration_cheer",
+    "assets/giantstomp/sounds/happy-animals-crowds-groups-sound-like-trumpeting-cheering-and-celebrating.mp3"
+  );
 }

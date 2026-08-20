@@ -26,6 +26,42 @@ const soundInteractionPolicy = {
   },
   land5: {
     allowDuringFastForward: false
+  },
+  giant_stomp: {
+    allowDuringFastForward: false
+  },
+  construction_1: {
+    allowDuringFastForward: false
+  },
+  construction_2: {
+    allowDuringFastForward: false
+  },
+  construction_3: {
+    allowDuringFastForward: false
+  },
+  animal_crush_splatter: {
+    allowDuringFastForward: false
+  },
+  animal_crush_gore: {
+    allowDuringFastForward: false
+  },
+  giant_laugh: {
+    allowDuringFastForward: false
+  },
+  ouch_stomp1: {
+    allowDuringFastForward: false
+  },
+  ouch_stomp2: {
+    allowDuringFastForward: false
+  },
+  giant_pain_scream: {
+    allowDuringFastForward: false
+  },
+  giant_pain_scream2: {
+    allowDuringFastForward: false
+  },
+  ouch_celebration_cheer: {
+    allowDuringFastForward: false
   }
 };
 

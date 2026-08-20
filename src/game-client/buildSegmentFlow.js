@@ -14,6 +14,10 @@ export function buildSegmentFlow({
   const hasScatters = Array.isArray(gameState.scatterLandings) && gameState.scatterLandings.length > 0;
   const hasStomp = !!gameState.stompEvent?.triggered;
   const hasCrush = !!gameState.crushEvent?.triggered;
+  const isBonusCashSpin = action === "freespin" && gameState.isBonus;
+  const hasBonusLandings = isBonusCashSpin
+    && Array.isArray(gameState.bonusLandings)
+    && gameState.bonusLandings.length > 0;
   const dropReels = gameState.stompEvent?.reelsBeforeStomp
     || gameState.crushEvent?.reelsBeforeCrush
     || gameState.reels;
@@ -24,6 +28,10 @@ export function buildSegmentFlow({
       checkpoint: false,
       enabled: FULL_DROP_ACTIONS.has(action),
       run: async () => {
+        if (isBonusCashSpin) {
+          await scene.spinBonusReels?.(dropReels);
+          return;
+        }
         await scene.slideOutOldSymbols();
         await scene.dropSymbols(dropReels);
       },
@@ -58,8 +66,19 @@ export function buildSegmentFlow({
     },
     {
       checkpoint: false,
-      enabled: hasScatters || !!gameState.angerMeter,
-      run: () => scene.presentScatterLandings(gameState.scatterLandings || [], gameState.angerMeter),
+      enabled: hasScatters,
+      run: () => scene.presentScatterLandings(gameState.scatterLandings || []),
+      onSkipAction: skipVisual,
+    },
+    {
+      checkpoint: false,
+      enabled: isBonusCashSpin,
+      run: () => scene.presentBonusCashLandings?.(
+        hasBonusLandings ? gameState.bonusLandings : [],
+        gameState.trapMeter,
+        gameState.bonusState,
+        gameState.damageWheel
+      ),
       onSkipAction: skipVisual,
     },
     {
@@ -81,7 +100,7 @@ export function buildSegmentFlow({
     },
     {
       checkpoint: true,
-      enabled: true,
+      enabled: !isBonusCashSpin,
       run: () => scene.updateCountUp(gameState.twa || 0),
     },
   ];

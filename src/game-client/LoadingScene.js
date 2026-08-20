@@ -3,8 +3,8 @@ import gameClientConfig from "./config/gameClientConfig";
 import { queueGameSceneAssets } from "./queueGameSceneAssets";
 import { gameSceneAssetDeps } from "./gameSceneAssetDeps";
 
-export const LOADING_BACKGROUND_TEXTURE_KEY = "helldive_loading_bg";
-const LOADING_BACKGROUND_PATH = "assets/helldive/backgrounds/loading.png";
+export const LOADING_BACKGROUND_TEXTURE_KEY = "main_background";
+const LOADING_BACKGROUND_PATH = "assets/giantstomp/stompy_background.png";
 
 const PROGRESS_BAR = {
   width: 320,

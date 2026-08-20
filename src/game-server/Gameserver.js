@@ -105,6 +105,10 @@ export class GameServer {
   }
 
   validateBoard(board) {
+    const validSymbols = new Set([
+      ...Object.keys(serverConfig.symbolWeights || {}),
+      ...Object.keys(serverConfig.bonusSymbolWeights || {})
+    ].map(Number));
     if (!Array.isArray(board) || board.length !== this.width) {
       throw new Error(`Board must contain ${this.width} reels`);
     }
@@ -113,7 +117,7 @@ export class GameServer {
         throw new Error(`Every reel must contain ${this.height} rows`);
       }
       reel.forEach((symbol) => {
-        if (!Number.isInteger(Number(symbol)) || Number(symbol) < 1 || Number(symbol) > 27) {
+        if (!Number.isInteger(Number(symbol)) || !validSymbols.has(Number(symbol))) {
           throw new Error(`Invalid symbol: ${symbol}`);
         }
       });
@@ -137,10 +141,10 @@ export class GameServer {
     }
     if (ticket === "bonusEntry") {
       const board = this.buildNoWinBoard();
-      const scatter = serverConfig.scatterSymbol;
-      board[0][0] = scatter;
-      board[2][1] = scatter;
-      board[4][2] = scatter;
+      board[0][0] = 1;
+      board[1][0] = 2;
+      board[2][0] = 3;
+      board[3][0] = 4;
       return board;
     }
     if (ticket === "stompEntry") {
@@ -160,6 +164,61 @@ export class GameServer {
       return board;
     }
     return this.generateRandomBoard(isBonus ? serverConfig.bonusSymbolWeights : serverConfig.symbolWeights);
+  }
+
+  injectGuaranteedBonusPowerSeed(board, trapTracker = {}, spinIndex = 0) {
+    const maxSeedSpins = Math.max(0, Number(serverConfig.bonus?.guaranteedPowerSeedSpins) || 0);
+    if (spinIndex >= maxSeedSpins || Number(trapTracker?.power) > 0) return board;
+
+    const seedSymbols = (serverConfig.bonus?.guaranteedPowerSeedSymbols || [111, 222, 333, 444, 555])
+      .map(Number)
+      .filter((symbol) => Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0) > 0);
+    if (!seedSymbols.length) return board;
+
+    const seedSymbolSet = new Set(seedSymbols);
+    const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+    const damageSymbol = Number(serverConfig.bonus?.damageSymbol ?? 1000);
+    const protectedSymbols = new Set([
+      emptySymbol,
+      ...(serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map(Number),
+    ]);
+
+    let hasDirectPower = false;
+    const emptyCells = [];
+    const damageCells = [];
+    const fallbackCells = [];
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        const symbol = Number(board?.[reel]?.[row]);
+        if (seedSymbolSet.has(symbol)) {
+          hasDirectPower = true;
+        }
+        if (symbol === emptySymbol) {
+          emptyCells.push({ reel, row });
+          continue;
+        }
+        if (symbol === damageSymbol) {
+          damageCells.push({ reel, row });
+          continue;
+        }
+        if (!protectedSymbols.has(symbol) && !seedSymbolSet.has(symbol)) {
+          fallbackCells.push({ reel, row });
+        }
+      }
+    }
+    if (hasDirectPower) return board;
+
+    const candidates = emptyCells.length
+      ? emptyCells
+      : damageCells.length
+        ? damageCells
+        : fallbackCells;
+    if (!candidates.length) return board;
+
+    const target = candidates[Math.floor(this.random() * candidates.length)];
+    const seedSymbol = seedSymbols[Math.floor(this.random() * seedSymbols.length)];
+    board[target.reel][target.row] = seedSymbol;
+    return board;
   }
 
   evaluateWays(reels, betSize = 1) {
@@ -204,6 +263,272 @@ export class GameServer {
       winAmount,
       tbm,
       twa: winAmount
+    };
+  }
+
+  evaluateBonusCash(reels, _betSize = 1, trapTracker = {}, damageTracker = {}) {
+    const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+    const trapSymbols = new Set(
+      (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map(Number)
+    );
+    const damageSymbol = Number(serverConfig.bonus?.damageSymbol ?? 1000);
+    const required = Math.max(1, Number(serverConfig.bonus?.trapLightsRequired) || 4);
+    trapTracker.progress ||= {};
+    trapTracker.power = Number(trapTracker.power) || 0;
+    damageTracker.segments ||= [...(serverConfig.damageWheelSegments || [])].map(Number);
+    damageTracker.removedSegments ||= [];
+    damageTracker.remainingSegments ||= [...damageTracker.segments];
+    const landings = [];
+    let trapPower = trapTracker.power;
+
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        const symbol = Number(reels[reel][row]);
+        if (symbol === emptySymbol) continue;
+        const isDamage = symbol === damageSymbol;
+        const baseTbm = Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0);
+        if (baseTbm <= 0 && !isDamage) continue;
+
+        const symbolPower = asTbm(baseTbm);
+        const isTrap = trapSymbols.has(symbol);
+        const progressBefore = Number(trapTracker.progress?.[String(symbol)] || 0);
+        const lightsFilled = isTrap ? Math.min(required, progressBefore + 1) : progressBefore;
+        const completedTrap = isTrap && lightsFilled >= required;
+        const progressAfter = completedTrap ? 0 : lightsFilled;
+        const trapPowerBefore = trapPower;
+        let powerAwarded = 0;
+        let damageRemovedSegment = null;
+        if (isTrap) {
+          trapTracker.progress[String(symbol)] = progressAfter;
+          if (completedTrap) powerAwarded = symbolPower;
+        } else if (isDamage) {
+          damageRemovedSegment = damageTracker.remainingSegments.shift() ?? null;
+          if (damageRemovedSegment !== null) {
+            damageTracker.removedSegments.push(damageRemovedSegment);
+          }
+        } else {
+          powerAwarded = symbolPower;
+        }
+        trapPower = asTbm(trapPower + powerAwarded);
+        landings.push({
+          reel,
+          row,
+          symbol,
+          basePower: baseTbm,
+          symbolPower,
+          powerAwarded,
+          isTrap,
+          isDamage,
+          completedTrap,
+          trapProgressBefore: progressBefore,
+          trapLightsFilled: lightsFilled,
+          trapProgressAfter: progressAfter,
+          trapPowerBefore,
+          trapPowerAfter: trapPower,
+          damageRemovedSegment
+        });
+      }
+    }
+
+    trapTracker.power = trapPower;
+    return {
+      hasWin: landings.length > 0,
+      landings,
+      winAmount: 0,
+      tbm: 0,
+      trapPower
+    };
+  }
+
+  buildBonusCashState({
+    board,
+    pastAction,
+    nextAction,
+    result,
+    totals,
+    betSize,
+    roundMeta,
+    lives,
+    livesBeforeSpin,
+    livesAfterSpend,
+    maxLives,
+    spinIndex,
+    trapTracker,
+    damageTracker
+  }) {
+    return {
+      ...clone(serverConfig.gameState),
+      bucket: roundMeta.ticketStrategy,
+      betSize,
+      pastAction,
+      executedAction: "freespin",
+      nextAction,
+      reels: clone(board),
+      waysWins: [],
+      clusters: [],
+      winAmount: result.winAmount,
+      twa: totals.twa,
+      tbm: totals.tbm,
+      isBonus: true,
+      bonusLandings: clone(result.landings),
+      bonusState: {
+        initialFreespins: maxLives,
+        finalFreespins: lives,
+        livesRemaining: lives,
+        livesBeforeSpin,
+        livesAfterSpend,
+        maxLives,
+        spinsPlayed: spinIndex + 1,
+        resetLives: result.hasWin
+      },
+      trapMeter: {
+        progress: clone(trapTracker.progress),
+        required: Math.max(1, Number(serverConfig.bonus?.trapLightsRequired) || 4),
+        values: Object.fromEntries(
+          (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map((symbol) => [
+            String(symbol),
+            asTbm(Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0))
+          ])
+        ),
+        power: trapTracker.power
+      },
+      damageWheel: clone(damageTracker),
+      anger: 0,
+      angerMeter: {
+        count: 0,
+        max: serverConfig.anger.maximum
+      },
+      roundMeta: clone(roundMeta)
+    };
+  }
+
+  appendBonusCashGame({ roundStates, totals, betSize, roundMeta }) {
+    const maxLives = Math.max(1, Number(serverConfig.bonus?.lives) || 3);
+    const maxSpins = Math.max(maxLives, Number(serverConfig.bonus?.maxSpins) || 1000);
+    const trapTracker = {
+      progress: Object.fromEntries(
+        (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map((symbol) => [String(symbol), 0])
+      ),
+      power: 0
+    };
+    const damageTracker = {
+      segments: [...(serverConfig.damageWheelSegments || [])].map(Number),
+      removedSegments: [],
+      remainingSegments: [...(serverConfig.damageWheelSegments || [])].map(Number)
+    };
+    let lives = maxLives;
+    let pastAction = "bonustransition";
+
+    for (let spinIndex = 0; lives > 0 && spinIndex < maxSpins; spinIndex += 1) {
+      const livesBeforeSpin = lives;
+      lives -= 1;
+      const livesAfterSpend = lives;
+      let board = this.createInitialBoard({
+        action: "freespin",
+        ticket: null,
+        spinIndex,
+        isBonus: true
+      });
+      if (!this.boardProvider) {
+        board = this.injectGuaranteedBonusPowerSeed(board, trapTracker, spinIndex);
+      }
+      const result = this.evaluateBonusCash(board, betSize, trapTracker, damageTracker);
+      if (result.hasWin) lives = maxLives;
+      const isLastSpin = lives <= 0 || spinIndex + 1 >= maxSpins;
+      const nextAction = isLastSpin ? "spin" : "freespin";
+      roundStates.push(this.buildBonusCashState({
+        board,
+        pastAction,
+        nextAction,
+        result,
+        totals,
+        betSize,
+        roundMeta,
+        lives,
+        livesBeforeSpin,
+        livesAfterSpend,
+        maxLives,
+        spinIndex,
+        trapTracker,
+        damageTracker
+      }));
+      pastAction = "freespin";
+    }
+
+    const lastBonusState = roundStates.filter((state) => state.isBonus).at(-1);
+    if (lastBonusState) {
+      const ouchResult = this.resolveOuchStomp(trapTracker.power, damageTracker, betSize);
+      lastBonusState.ouchStompEvent = clone(ouchResult.event);
+      if (ouchResult.winAmount > 0) {
+        totals.twa = asTbm(totals.twa + ouchResult.winAmount);
+        lastBonusState.twa = totals.twa;
+      }
+    }
+  }
+
+  resolveOuchStomp(trapPower, damageWheel = {}, betSize = 1) {
+    const power = Number(trapPower) || 0;
+    const configuredSegments = [...(damageWheel?.segments || serverConfig.damageWheelSegments || [])].map(Number);
+    const rawRemaining = [...(damageWheel?.remainingSegments || [])].map(Number);
+    const remaining = rawRemaining.length
+      ? rawRemaining
+      : (power > 0 ? [configuredSegments[0] || 1] : []);
+    const stepOdds = Number(serverConfig.damageMultilpierStepOdds ?? 0.66);
+    const cfg = serverConfig.ouchStompFeature || {};
+    const stepIntervalMs = Math.max(0, Number(cfg.stepIntervalMs) || 3000);
+    const maxCoinsPerStep = Math.max(1, Number(cfg.maxCoinsPerStep) || 20);
+    const normalizedBet = Number(betSize) || 1;
+
+    if (power <= 0 || !remaining.length) {
+      return {
+        event: { triggered: false },
+        winAmount: 0,
+        winTbm: 0,
+      };
+    }
+
+    const consumedSegments = [];
+    const steps = [];
+    const workingRemaining = [...remaining];
+
+    const pushStep = (multiplier) => {
+      consumedSegments.push(multiplier);
+      const winTbm = asTbm(power * multiplier);
+      steps.push({
+        step: steps.length + 1,
+        multiplier,
+        winTbm,
+        winAmount: asMoney(winTbm * normalizedBet),
+      });
+    };
+
+    pushStep(workingRemaining.shift());
+    while (workingRemaining.length > 0 && this.random() < stepOdds) {
+      pushStep(workingRemaining.shift());
+    }
+
+    const lastStep = steps.at(-1);
+    const coinCountPerStep = Math.min(Math.max(1, Math.round(power)), maxCoinsPerStep);
+
+    return {
+      event: {
+        triggered: true,
+        trapPower: power,
+        steps,
+        finalMultiplier: lastStep.multiplier,
+        finalWinTbm: lastStep.winTbm,
+        finalWinAmount: lastStep.winAmount,
+        coinCountPerStep,
+        stepIntervalMs,
+        damageWheelBefore: {
+          ...clone(damageWheel),
+          segments: configuredSegments.length ? [...configuredSegments] : [1],
+          remainingSegments: [...remaining],
+        },
+        consumedSegments: [...consumedSegments],
+      },
+      winAmount: lastStep.winAmount,
+      winTbm: lastStep.winTbm,
     };
   }
 
@@ -464,6 +789,79 @@ export class GameServer {
     };
   }
 
+  getAngerMeterMax() {
+    return Math.max(1, Number(serverConfig.anger?.maximum) || 10);
+  }
+
+  getAngerDisplayCapBeforeBonus() {
+    const max = this.getAngerMeterMax();
+    const configured = Number(serverConfig.anger?.displayCapBeforeBonus);
+    if (!Number.isFinite(configured)) return max - 1;
+    return Math.max(1, Math.min(configured, max - 1));
+  }
+
+  getAngerMeterTickOdds() {
+    return Number(
+      serverConfig.angerMeterTickOdds
+      ?? serverConfig.angetMeterTickOdds
+      ?? 0.1
+    );
+  }
+
+  getBonusTriggerOdds(animalKillCount = 0) {
+    const table = serverConfig.bonusTriggerOdds || {};
+    const keys = Object.keys(table).map(Number).filter(Number.isFinite);
+    const capped = keys.length
+      ? Math.min(Math.max(0, Math.floor(Number(animalKillCount) || 0)), Math.max(...keys))
+      : Math.max(0, Math.floor(Number(animalKillCount) || 0));
+    return Number(table[String(capped)] ?? 0);
+  }
+
+  createRoundTracker() {
+    return {
+      triggered: false,
+      consumedScatterKeys: new Set(),
+      animalsKilled: 0,
+      angerDisplay: 0,
+    };
+  }
+
+  processAnimalKills(cells = [], tracker, { forceBonus = false } = {}) {
+    const cap = this.getAngerDisplayCapBeforeBonus();
+    const animals = (Array.isArray(cells) ? cells : []).filter((cell) => cell?.isAnimal);
+    const events = [];
+
+    animals.forEach((cell) => {
+      tracker.animalsKilled += 1;
+      const ticked = this.random() < this.getAngerMeterTickOdds();
+      if (ticked && tracker.angerDisplay < cap) {
+        tracker.angerDisplay += 1;
+      }
+      events.push({
+        reel: cell.reel,
+        row: cell.row,
+        symbol: cell.symbol,
+        ticked,
+        displayAfter: tracker.angerDisplay,
+      });
+    });
+
+    let bonusTriggered = false;
+    if (!tracker.triggered && animals.length > 0) {
+      const odds = forceBonus ? 100 : this.getBonusTriggerOdds(tracker.animalsKilled);
+      if (this.random() * 100 < odds) {
+        bonusTriggered = true;
+        tracker.triggered = true;
+      }
+    }
+
+    return {
+      events,
+      bonusTriggered,
+      animalsKilled: tracker.animalsKilled,
+    };
+  }
+
   scatterPositionKey({ reel, row }) {
     return `${reel},${row}`;
   }
@@ -475,27 +873,14 @@ export class GameServer {
     return positions.filter((position) => !consumedScatterKeys.has(this.scatterPositionKey(position)));
   }
 
-  consumeScatterLandings(positions, tracker, { isBonus = false } = {}) {
-    return positions.map((position) => {
-      const angerBefore = tracker.anger;
-      const counted = !isBonus && !tracker.triggered && tracker.anger < serverConfig.anger.maximum;
-      if (counted) {
-        tracker.anger += 1;
-        tracker.consumedScatterKeys.add(this.scatterPositionKey(position));
-      }
-      const triggeredBonus = counted && tracker.anger >= serverConfig.anger.maximum;
-      if (triggeredBonus) {
-        tracker.triggered = true;
-        tracker.anger = 0;
-      }
-      return {
-        ...position,
-        counted,
-        angerBefore,
-        angerAfter: tracker.anger,
-        triggeredBonus
-      };
-    });
+  consumeScatterLandings(positions) {
+    return positions.map((position) => ({
+      ...position,
+      counted: false,
+      angerBefore: 0,
+      angerAfter: 0,
+      triggeredBonus: false,
+    }));
   }
 
   buildActionState({
@@ -515,8 +900,11 @@ export class GameServer {
     bonusRemaining,
     bonusTriggeredThisAction,
     stompEvent = null,
-    crushEvent = null
+    crushEvent = null,
+    animalKillEvents = [],
   }) {
+    const angerMax = this.getAngerMeterMax();
+    const angerCount = bonusTriggeredThisAction ? angerMax : tracker.angerDisplay;
     return {
       ...clone(serverConfig.gameState),
       bucket: roundMeta.ticketStrategy,
@@ -537,21 +925,22 @@ export class GameServer {
       tbm: totals.tbm,
       bgwe: bonusTriggeredThisAction,
       bonusGameWonEvent: bonusTriggeredThisAction
-        ? { source: "anger", action }
+        ? { source: "animalCrush", action }
         : null,
       isBonus,
       bonusState: {
         initialFreespins: isBonus ? serverConfig.bonus.freespins : 0,
         finalFreespins: isBonus ? bonusRemaining : 0
       },
-      anger: tracker.anger,
+      anger: angerCount,
       angerMeter: {
-        count: tracker.anger,
-        max: serverConfig.anger.maximum
+        count: angerCount,
+        max: angerMax,
       },
+      animalKillEvents: clone(animalKillEvents),
       angerEvent: {
         triggered: bonusTriggeredThisAction,
-        ignoredLandings: scatterLandings.filter((landing) => !landing.counted).length
+        ignoredLandings: scatterLandings.filter((landing) => !landing.counted).length,
       },
       stompEvent: stompEvent ? clone(stompEvent) : null,
       crushEvent: crushEvent ? clone(crushEvent) : null,
@@ -575,7 +964,8 @@ export class GameServer {
     forceStomp = false,
     allowNaturalStomp = false,
     forceCrush = false,
-    allowNaturalCrush = false
+    allowNaturalCrush = false,
+    forceBonus = false,
   }) {
     let board = clone(initialBoard);
     let action = initialAction;
@@ -585,6 +975,8 @@ export class GameServer {
     for (let cascade = 0; cascade <= serverConfig.maxCascadesPerSpin; cascade += 1) {
       let stompEvent = null;
       let crushEvent = null;
+      let animalKillEvents = [];
+      let bonusTriggeredThisAction = false;
       if (cascade === 0 && initialAction === "spin" && !isBonus) {
         const stompResult = this.resolveStompFeature(board, {
           forceStomp,
@@ -597,7 +989,7 @@ export class GameServer {
           totals.twa = asTbm(totals.twa + Number(stompEvent.coinWin || 0));
         } else {
           const crushResult = this.resolveCrushFeature(board, {
-            forceCrush,
+            forceCrush: forceCrush || forceBonus,
             allowNatural: allowNaturalCrush,
             betSize,
           });
@@ -607,15 +999,35 @@ export class GameServer {
             totals.twa = asTbm(totals.twa + Number(crushEvent.coinWin || 0));
           }
         }
+
+        const killCells = stompEvent?.crushedCells || crushEvent?.crushedCells || [];
+        if (killCells.length) {
+          const killResult = this.processAnimalKills(killCells, tracker, { forceBonus });
+          animalKillEvents = killResult.events;
+          bonusTriggeredThisAction = killResult.bonusTriggered;
+          if (stompEvent) {
+            stompEvent.animalKillEvents = clone(killResult.events);
+            stompEvent.bonusTriggered = killResult.bonusTriggered;
+          }
+          if (crushEvent) {
+            crushEvent.animalKillEvents = clone(killResult.events);
+            crushEvent.bonusTriggered = killResult.bonusTriggered;
+          }
+        }
+
+        if (forceBonus && !tracker.triggered) {
+          tracker.triggered = true;
+          bonusTriggeredThisAction = true;
+          if (stompEvent) stompEvent.bonusTriggered = true;
+          if (crushEvent) crushEvent.bonusTriggered = true;
+        }
       }
 
       const result = this.evaluateWays(board, betSize);
       totals.twa = asTbm(totals.twa + result.winAmount);
       totals.tbm = asTbm(totals.tbm + result.tbm);
       const scatterCandidates = this.collectScatterCandidates(board, gravityResult, tracker.consumedScatterKeys);
-      const wasTriggered = tracker.triggered;
-      const scatterLandings = this.consumeScatterLandings(scatterCandidates, tracker, { isBonus });
-      const triggeredNow = !wasTriggered && tracker.triggered;
+      const scatterLandings = this.consumeScatterLandings(scatterCandidates);
       const removedBoard = result.hasWins
         ? this.removeWinningPositions(board, result.waysWins)
         : null;
@@ -638,11 +1050,13 @@ export class GameServer {
         roundMeta,
         isBonus,
         bonusRemaining,
-        bonusTriggeredThisAction: triggeredNow,
+        bonusTriggeredThisAction,
         stompEvent,
-        crushEvent
+        crushEvent,
+        animalKillEvents,
       }));
 
+      if (tracker.triggered) return "bonustransition";
       if (!result.hasWins) return nextAction;
       if (cascade === serverConfig.maxCascadesPerSpin) {
         throw new Error("Maximum cascade count exceeded");
@@ -667,9 +1081,9 @@ export class GameServer {
     const roundMeta = this.buildRoundMeta({ betSize: normalizedBet, ticketStrategy: strategy, ticket });
     const forceStomp = ticket === "stompEntry";
     const allowNaturalStomp = ticket === "random";
-    const forceCrush = ticket === "crushEntry";
+    const forceCrush = ticket === "crushEntry" || ticket === "bonusEntry";
     const allowNaturalCrush = ticket === "random";
-    const tracker = { anger: 0, triggered: false, consumedScatterKeys: new Set() };
+    const tracker = this.createRoundTracker();
     const totals = { twa: 0, tbm: 0 };
     const roundStates = [];
 
@@ -695,10 +1109,12 @@ export class GameServer {
       forceStomp,
       allowNaturalStomp,
       forceCrush,
-      allowNaturalCrush
+      allowNaturalCrush,
+      forceBonus: ticket === "bonusEntry",
     });
 
     if (paidNext === "bonustransition") {
+      const bonusLives = Math.max(1, Number(serverConfig.bonus?.lives) || 3);
       roundStates.push({
         ...clone(serverConfig.gameState),
         bucket: strategy,
@@ -709,43 +1125,50 @@ export class GameServer {
         twa: totals.twa,
         tbm: totals.tbm,
         bgwe: true,
-        bonusGameWonEvent: { source: "anger", action: roundStates.at(-1).executedAction },
+        bonusGameWonEvent: { source: "animalCrush", action: roundStates.at(-1).executedAction },
         isBonus: true,
         bonusState: {
-          initialFreespins: serverConfig.bonus.freespins,
-          finalFreespins: serverConfig.bonus.freespins
+          initialFreespins: bonusLives,
+          finalFreespins: bonusLives,
+          livesRemaining: bonusLives,
+          livesBeforeSpin: bonusLives,
+          livesAfterSpend: bonusLives,
+          maxLives: bonusLives,
+          spinsPlayed: 0,
+          resetLives: false
+        },
+        trapMeter: {
+          progress: Object.fromEntries(
+            (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map((symbol) => [String(symbol), 0])
+          ),
+          required: Math.max(1, Number(serverConfig.bonus?.trapLightsRequired) || 4),
+          values: Object.fromEntries(
+            (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map((symbol) => [
+              String(symbol),
+              asTbm(Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0))
+            ])
+          ),
+          power: 0
+        },
+        damageWheel: {
+          segments: [...(serverConfig.damageWheelSegments || [])].map(Number),
+          removedSegments: [],
+          remainingSegments: [...(serverConfig.damageWheelSegments || [])].map(Number)
         },
         anger: 0,
         angerMeter: {
           count: 0,
-          max: serverConfig.anger.maximum
+          max: this.getAngerMeterMax(),
         },
         roundMeta: clone(roundMeta)
       });
 
-      for (let spinIndex = 0; spinIndex < serverConfig.bonus.freespins; spinIndex += 1) {
-        const remaining = serverConfig.bonus.freespins - spinIndex - 1;
-        const bonusBoard = this.createInitialBoard({
-          action: "freespin",
-          ticket: null,
-          spinIndex,
-          isBonus: true
-        });
-        this.appendCascadeChain({
-          roundStates,
-          initialBoard: bonusBoard,
-          initialAction: "freespin",
-          cascadeAction: "freerespin",
-          pastAction: roundStates.at(-1).executedAction,
-          nextWhenDone: remaining > 0 ? "freespin" : "spin",
-          tracker,
-          totals,
-          betSize: normalizedBet,
-          roundMeta,
-          isBonus: true,
-          bonusRemaining: remaining
-        });
-      }
+      this.appendBonusCashGame({
+        roundStates,
+        totals,
+        betSize: normalizedBet,
+        roundMeta
+      });
     }
 
     const finalState = roundStates.at(-1);
@@ -755,9 +1178,10 @@ export class GameServer {
       normalWinTBM: roundStates
         .filter((state) => !state.isBonus)
         .reduce((sum, state) => asTbm(sum + Number(state.waysWins?.reduce((s, win) => s + win.tbm, 0) || 0)), 0),
-      bonusWinTBM: roundStates
-        .filter((state) => state.isBonus)
-        .reduce((sum, state) => asTbm(sum + Number(state.waysWins?.reduce((s, win) => s + win.tbm, 0) || 0)), 0),
+      bonusWinTBM: asTbm(Number(finalState?.ouchStompEvent?.finalWinTbm || 0)),
+      trapPower: Number(
+        [...roundStates].reverse().find((state) => state.isBonus)?.trapMeter?.power || 0
+      ),
       wasBonus: paidNext === "bonustransition",
       isComplete: true
     };

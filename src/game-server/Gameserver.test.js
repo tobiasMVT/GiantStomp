@@ -60,7 +60,7 @@ test("removes the union of wins and applies downward gravity", () => {
   assert.ok(gravity.dropEvent.movements.every((movement) => Number.isInteger(movement.to)));
 });
 
-test("accumulates Anger within one paid round and resets on the next", async () => {
+test("scatter landings no longer charge Anger", async () => {
   const provider = ({ action }) => {
     const board = noWinBoard();
     if (action === "spin") board[4][2] = SCATTER;
@@ -70,58 +70,40 @@ test("accumulates Anger within one paid round and resets on the next", async () 
 
   const first = await server.generateRoundStates({ ticketStrategy: "noWin" });
   const second = await server.generateRoundStates({ ticketStrategy: "noWin" });
-  const third = await server.generateRoundStates({ ticketStrategy: "noWin" });
 
-  assert.equal(first.at(-1).anger, 1);
-  assert.deepEqual(first.at(-1).angerMeter, { count: 1, max: 3 });
-  assert.equal(second.at(-1).anger, 1);
-  assert.deepEqual(second.at(-1).angerMeter, { count: 1, max: 3 });
-  assert.equal(third.at(-1).anger, 1);
-  assert.deepEqual(third.at(-1).angerMeter, { count: 1, max: 3 });
+  assert.equal(first.at(-1).anger, 0);
+  assert.deepEqual(first.at(-1).angerMeter, { count: 0, max: 10 });
+  assert.equal(second.at(-1).anger, 0);
+  assert.deepEqual(second.at(-1).angerMeter, { count: 0, max: 10 });
 });
 
-test("fills Anger from scatters across cascades in one round", async () => {
-  const provider = ({ action }) => {
-    if (action === "freespin") return noWinBoard();
-    const board = noWinBoard();
-    board[0][0] = 1;
-    board[1][0] = 1;
-    board[2][0] = 1;
-    return board;
-  };
-  const server = new GameServer({ random: () => 0.999999, boardProvider: provider });
+test("crush spins attach fake Anger kill events", () => {
+  const server = new GameServer({ random: () => 0.05 });
+  const board = noWinBoard();
+  board[0][0] = 1;
+  board[1][0] = 2;
+  board[2][0] = 3;
+  const tracker = server.createRoundTracker();
+  const crushResult = server.resolveCrushFeature(board, { forceCrush: true, betSize: 1 });
+  const killResult = server.processAnimalKills(crushResult.crushEvent.crushedCells, tracker);
 
-  const states = await server.generateRoundStates({ betSize: 1, ticketStrategy: "waysWin" });
-  const spin = states.find((state) => state.executedAction === "spin");
-  const respin = states.find((state) => state.executedAction === "respin");
-
-  assert.equal(spin.scatterLandings.length, 0);
-  assert.equal(respin.scatterLandings.length, 4);
-  assert.deepEqual(respin.scatterLandings.map((landing) => landing.counted), [true, true, true, false]);
-  assert.equal(states.filter((state) => state.executedAction === "bonustransition").length, 1);
-  assert.equal(states.filter((state) => state.executedAction === "freespin").length, 3);
-  assert.deepEqual(states.at(-1).angerMeter, { count: 0, max: 3 });
+  assert.ok(crushResult?.crushEvent?.triggered);
+  assert.ok(killResult.events.length >= 1);
+  assert.ok(killResult.events.every((event) => typeof event.ticked === "boolean"));
+  assert.ok(tracker.angerDisplay >= 0);
+  assert.ok(tracker.angerDisplay <= 9);
 });
 
-test("ignores extra scatters after Anger triggers", async () => {
-  const provider = ({ action }) => {
-    const board = noWinBoard();
-    if (action === "spin") {
-      board[0][0] = SCATTER;
-      board[1][0] = SCATTER;
-      board[2][1] = SCATTER;
-      board[4][2] = SCATTER;
-    }
-    return board;
-  };
-  const server = new GameServer({ random: () => 0, boardProvider: provider });
+test("bonusEntry dev ticket forces bonus through crushed animals", async () => {
+  const server = new GameServer({ random: () => 0.999999 });
 
   const states = await server.generateRoundStates({ ticketStrategy: "bonusEntry" });
-  const landings = states[0].scatterLandings;
+  const spin = states.find((state) => state.executedAction === "spin");
 
-  assert.equal(landings.length, 4);
-  assert.deepEqual(landings.map((landing) => landing.counted), [true, true, true, false]);
-  assert.equal(landings[2].triggeredBonus, true);
+  assert.ok(spin?.crushEvent?.triggered || spin?.stompEvent?.triggered);
+  assert.equal(spin.bonusGameWonEvent?.source, "animalCrush");
+  assert.equal(states.filter((state) => state.executedAction === "bonustransition").length, 1);
+  assert.ok(states.filter((state) => state.executedAction === "freespin").length >= 1);
 });
 
 test("fake no-win rounds still report scatter landings without bonus entry", async () => {
@@ -135,9 +117,26 @@ test("fake no-win rounds still report scatter landings without bonus entry", asy
   const states = await server.generateRoundStates({ fakeNoWins: true });
 
   assert.equal(states.at(-1).simulationFakeNoWin, true);
-  assert.equal(states.at(-1).anger, 1);
-  assert.deepEqual(states.at(-1).angerMeter, { count: 1, max: 3 });
+  assert.equal(states.at(-1).anger, 0);
+  assert.deepEqual(states.at(-1).angerMeter, { count: 0, max: 10 });
   assert.equal(states.filter((state) => state.executedAction === "bonustransition").length, 0);
+});
+
+test("processAnimalKills caps fake Anger display before bonus", () => {
+  const server = new GameServer({ random: () => 0 });
+  const tracker = server.createRoundTracker();
+  const cells = Array.from({ length: 12 }, (_, index) => ({
+    reel: index % 5,
+    row: 0,
+    symbol: 1,
+    isAnimal: true,
+  }));
+
+  const result = server.processAnimalKills(cells, tracker, { forceBonus: false });
+
+  assert.equal(result.events.length, 12);
+  assert.equal(tracker.angerDisplay, 9);
+  assert.equal(result.bonusTriggered, true);
 });
 
 test("stompEntry ticket always triggers giant stomp on paid spin", async () => {
@@ -238,6 +237,217 @@ test("crush does not run during bonus freespins", async () => {
   const states = await server.generateRoundStates({ ticketStrategy: "bonusEntry" });
   const freespins = states.filter((state) => state.executedAction === "freespin");
 
-  assert.equal(states.find((state) => state.executedAction === "spin")?.crushEvent, null);
+  assert.ok(states.find((state) => state.executedAction === "spin")?.crushEvent?.triggered);
   freespins.forEach((state) => assert.equal(state.crushEvent, null));
+});
+
+test("bonus cash spins spend lives and a cash landing resets them to three", async () => {
+  const provider = ({ action, spinIndex }) => {
+    if (action === "spin") {
+      const board = noWinBoard();
+      board[0][0] = SCATTER;
+      board[1][0] = SCATTER;
+      board[2][1] = SCATTER;
+      return board;
+    }
+    const emptyBoard = Array.from({ length: 5 }, () => Array(3).fill(0));
+    if (spinIndex === 1) emptyBoard[2][1] = 111;
+    return emptyBoard;
+  };
+  const server = new GameServer({ random: () => 0.999999, boardProvider: provider });
+
+  const states = await server.generateRoundStates({ betSize: 2, ticketStrategy: "bonusEntry" });
+  const bonusSpins = states.filter((state) => state.executedAction === "freespin");
+
+  assert.equal(bonusSpins.length, 5);
+  assert.deepEqual(
+    bonusSpins.map((state) => state.bonusState.livesRemaining),
+    [2, 3, 2, 1, 0]
+  );
+  assert.equal(bonusSpins[1].bonusLandings[0].symbol, 111);
+  assert.equal(bonusSpins[1].bonusLandings[0].powerAwarded, 0.1);
+  assert.equal(bonusSpins[1].winAmount, 0);
+  assert.equal(bonusSpins[1].trapMeter.power, 0.1);
+  assert.equal(bonusSpins.at(-1).nextAction, "spin");
+});
+
+test("bonus cash seeds low trap power during the first two bonus spins when needed", async () => {
+  const server = new GameServer({ random: () => 0.999999 });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "bonusEntry" });
+  const bonusSpins = states.filter((state) => state.executedAction === "freespin");
+  const firstSeedLanding = bonusSpins[0]?.bonusLandings?.find((landing) => (
+    [111, 222, 333, 444, 555].includes(landing.symbol)
+  ));
+
+  assert.ok(firstSeedLanding);
+  assert.ok(Number(bonusSpins[0].trapMeter.power) > 0);
+  assert.equal(bonusSpins.at(-1)?.ouchStompEvent?.triggered, true);
+});
+
+test("traps award power only on four lights and damage removes the lowest meter segment", () => {
+  const server = new GameServer();
+  const board = Array.from({ length: 5 }, () => Array(3).fill(0));
+  board[0][0] = 666;
+  board[1][1] = 666;
+  board[3][0] = 777;
+  board[2][2] = 1000;
+  const trapTracker = {
+    progress: { "666": 3, "777": 0, "888": 0 },
+    power: 10
+  };
+  const damageTracker = {
+    segments: [1, 2, 3],
+    removedSegments: [],
+    remainingSegments: [1, 2, 3]
+  };
+
+  const result = server.evaluateBonusCash(board, 1, trapTracker, damageTracker);
+
+  assert.equal(result.landings.length, 4);
+  assert.equal(trapTracker.progress["777"], 1);
+  assert.equal(result.trapPower, 15);
+  assert.equal(result.winAmount, 0);
+  assert.deepEqual(damageTracker.removedSegments, [1]);
+  assert.deepEqual(damageTracker.remainingSegments, [2, 3]);
+  assert.equal(result.landings.find((landing) => landing.symbol === 777).powerAwarded, 0);
+  assert.equal(result.landings.find((landing) => landing.symbol === 1000).isDamage, true);
+
+  const [completed, restarted] = result.landings.filter((landing) => landing.symbol === 666);
+  assert.deepEqual(
+    { completedTrap: completed.completedTrap, lights: completed.trapLightsFilled, after: completed.trapProgressAfter },
+    { completedTrap: true, lights: 4, after: 0 }
+  );
+  assert.deepEqual(
+    { completedTrap: restarted.completedTrap, lights: restarted.trapLightsFilled, after: restarted.trapProgressAfter },
+    { completedTrap: false, lights: 1, after: 1 }
+  );
+  assert.equal(trapTracker.progress["666"], 1);
+});
+
+test("bonus spins report the life spent before the outcome is known", async () => {
+  const provider = ({ action, spinIndex }) => {
+    if (action === "spin") {
+      const board = noWinBoard();
+      board[0][0] = SCATTER;
+      board[1][0] = SCATTER;
+      board[2][1] = SCATTER;
+      return board;
+    }
+    const emptyBoard = Array.from({ length: 5 }, () => Array(3).fill(0));
+    if (spinIndex === 0) emptyBoard[1][1] = 222;
+    return emptyBoard;
+  };
+  const server = new GameServer({ random: () => 0.999999, boardProvider: provider });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "bonusEntry" });
+  const bonusSpins = states.filter((state) => state.executedAction === "freespin");
+
+  assert.deepEqual(
+    bonusSpins.map(({ bonusState }) => [
+      bonusState.livesBeforeSpin,
+      bonusState.livesAfterSpend,
+      bonusState.livesRemaining,
+    ]),
+    [[3, 2, 3], [3, 2, 2], [2, 1, 1], [1, 0, 0]]
+  );
+});
+
+test("resolveOuchStomp always grants step 1 and uses trapPower times multiplier for win", () => {
+  const server = new GameServer({ random: () => 1 });
+  const damageWheel = {
+    segments: [1, 2, 3],
+    removedSegments: [],
+    remainingSegments: [1, 2, 3],
+  };
+
+  const result = server.resolveOuchStomp(5, damageWheel, 1);
+
+  assert.equal(result.event.triggered, true);
+  assert.equal(result.event.steps.length, 1);
+  assert.deepEqual(result.event.steps[0], {
+    step: 1,
+    multiplier: 1,
+    winTbm: 5,
+    winAmount: 5,
+  });
+  assert.equal(result.event.finalMultiplier, 1);
+  assert.equal(result.event.finalWinAmount, 5);
+  assert.equal(result.winAmount, 5);
+  assert.deepEqual(result.event.consumedSegments, [1]);
+});
+
+test("resolveOuchStomp continues while random is below damageMultilpierStepOdds", () => {
+  let roll = 0;
+  const server = new GameServer({
+    random: () => {
+      roll += 1;
+      return roll === 1 ? 0.5 : 0.9;
+    },
+  });
+  const damageWheel = {
+    segments: [1, 2, 3, 4],
+    removedSegments: [],
+    remainingSegments: [1, 2, 3, 4],
+  };
+
+  const result = server.resolveOuchStomp(5, damageWheel, 1);
+
+  assert.equal(result.event.steps.length, 2);
+  assert.equal(result.event.steps[1].multiplier, 2);
+  assert.equal(result.event.finalWinAmount, 10);
+  assert.deepEqual(result.event.consumedSegments, [1, 2]);
+});
+
+test("resolveOuchStomp skips when trap power is zero", () => {
+  const server = new GameServer({ random: () => 0 });
+  const damageWheel = {
+    segments: [1, 2, 3],
+    removedSegments: [],
+    remainingSegments: [1, 2, 3],
+  };
+
+  const result = server.resolveOuchStomp(0, damageWheel, 1);
+
+  assert.equal(result.event.triggered, false);
+  assert.equal(result.winAmount, 0);
+});
+
+test("bonus end attaches ouchStompEvent and credits twa", async () => {
+  let roll = 0;
+  const provider = ({ action, spinIndex }) => {
+    if (action === "spin") {
+      const board = noWinBoard();
+      board[0][0] = SCATTER;
+      board[1][0] = SCATTER;
+      board[2][1] = SCATTER;
+      return board;
+    }
+    const emptyBoard = Array.from({ length: 5 }, () => Array(3).fill(0));
+    if (spinIndex === 0) emptyBoard[0][0] = 666;
+    if (spinIndex === 1) emptyBoard[1][1] = 666;
+    if (spinIndex === 2) emptyBoard[2][2] = 666;
+    if (spinIndex === 3) emptyBoard[3][1] = 666;
+    return emptyBoard;
+  };
+  const server = new GameServer({
+    random: () => {
+      roll += 1;
+      return roll % 2 === 0 ? 0.1 : 0.9;
+    },
+    boardProvider: provider,
+  });
+
+  const states = await server.generateRoundStates({ betSize: 1, ticketStrategy: "bonusEntry" });
+  const lastBonusSpin = states.filter((state) => state.executedAction === "freespin").at(-1);
+
+  assert.equal(lastBonusSpin.nextAction, "spin");
+  assert.equal(lastBonusSpin.ouchStompEvent?.triggered, true);
+  assert.ok(Number(lastBonusSpin.ouchStompEvent?.trapPower) > 0);
+  assert.ok(Number(lastBonusSpin.ouchStompEvent?.finalWinAmount) > 0);
+  const twaBeforeOuch = states.filter((state) => state.isBonus).at(-2)?.twa ?? 0;
+  assert.equal(
+    lastBonusSpin.twa,
+    Number(twaBeforeOuch) + Number(lastBonusSpin.ouchStompEvent.finalWinAmount)
+  );
 });

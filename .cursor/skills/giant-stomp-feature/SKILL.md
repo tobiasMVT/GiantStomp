@@ -20,6 +20,7 @@ On a triggered paid spin, before ways evaluation:
 1. Pick consecutive reel strip.
 2. Zero all cells on those reels.
 3. Emit `stompEvent` on the `spin` action state with `reelsBeforeStomp`, `crushedCells`, and `reels` (post-stomp board).
+4. Crushed animals contribute to round kill count, fake Anger ticks, and `bonusTriggerOdds`.
 
 Dev / forced entry:
 
@@ -32,7 +33,7 @@ Dev / forced entry:
 
 - Drop uses `stompEvent.reelsBeforeStomp` so symbols are visible before the foot lands.
 - `buildSegmentFlow.js` runs `presentStompFeature` after the settle delay.
-- `GameScene.presentStompFeature`: tease camera shake → pause → foot drop → crush VFX → foot slides back up off-screen (no fade).
+- `GameScene.presentStompFeature`: one pre-step boom shake → pause → foot drop → one landing shake → crush VFX → foot slides back up off-screen (no fade).
 - Animals (`1`–`5`) use `giantstomp` symbol art, blood particles, gibs, and `yellow_coin` atlas animation.
 
 Assets: `src/game-client/assets/giantstomp/`.

@@ -33,19 +33,23 @@ Bonus:
 
 Initial `spin` and `freespin` use the full-board top drop. `respin` and `freerespin` use `dropEvent.movements`.
 
-## Scatter and Anger rules
+## Bonus entry and fake Anger
 
-- Count each newly landed scatter once, including scatter symbols introduced by a cascade.
-- Emit `scatterLandings` on the action where the scatter arrives.
-- A scatter is consumed after charging Anger and must not charge again if it survives into another cascade.
-- Anger resets at the start of each paid round. Collect scatters from the initial `spin` through cascades until `nextAction` is `spin`.
-- Three consumed scatters fill Anger, reset it, and enter a three-freespin bonus.
-- Once a round has triggered the bonus, further scatters in that round have no effect.
-- Bonus recharge and special bonus symbols are intentionally deferred.
+- Scatters no longer charge Anger or trigger bonus.
+- Paid stomp/crush events count crushed animals for the round.
+- After the feature resolves, roll `bonusTriggerOdds[killCount]` (capped by config keys).
+- Each animal kill may also tick the fake Anger display using `angerMeterTickOdds`.
+- Display cap before bonus is `anger.displayCapBeforeBonus` (default 9 on a 10-step meter).
+- When bonus triggers, the action reports `angerMeter.count = 10`, latches bonus, and cascades stop immediately.
+- `animalKillEvents` on the action/stomp/crush payload drives client meter ticks per crushed animal.
+- Client Anger display persists across paid spins; reset only in `GameScene.leaveBonus()`.
+- Server `ticked` is authoritative; client increments its own display count on tick (do not sync `displayAfter` from server each spin).
 
 ## Client rules
 
 - `Client` owns action sequencing; `GameScene` owns animation.
 - Main and bonus use the same board drop, ways highlight, explosion, and gravity primitives.
 - Keep `reelSprites[reel][row]` aligned with server state.
-- Animate Anger from `scatterLandings`; never infer a new charge from a scatter merely remaining visible.
+- Animate fake Anger from `animalKillEvents` during stomp/crush presentation; coin drop, blood, and anger embers start at the kill moment.
+- When bonus triggers, overcharge fills remaining meter steps on the bar only (no extra kill-position embers); pacing accelerates from a slow beat into a burst.
+- Increase Anger blink intensity as the display fill rises.

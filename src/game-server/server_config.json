@@ -24,7 +24,7 @@
     "8": 20,
     "9": 21,
     "10": 22,
-    "13": 5
+    "13": 0
   },
   "coinTypes": {
     "20": 1,
@@ -47,15 +47,31 @@
     "27": 8
   },
   "bonusSymbolWeights": {
-    "1": 12,
-    "2": 13,
-    "3": 14,
-    "4": 15,
-    "5": 16,
-    "6": 17,
-    "7": 18,
-    "8": 2
+    "111": 20,
+    "222": 20,
+    "333": 20,
+    "444": 20,
+    "555": 20,
+    "666": 20,
+    "777": 20,
+    "888": 20,
+    "999": 20,
+    "1000": 15,
+    "0": 3000
   },
+"bonusWinAmounts": {
+    "111": 0.1,
+    "222": 0.2,
+    "333": 0.3,
+    "444": 0.5,
+    "555": 1,
+    "666": 5,
+    "777": 10,
+    "888": 25,
+    "999": 50,
+    "1000": 0
+  },
+  "damageWheelSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
   "paytable": {
     "1": { "3": 0.5, "4": 1, "5": 2 },
     "2": { "3": 0.4, "4": 0.8, "5": 1.5 },
@@ -66,7 +82,8 @@
     "7": { "3": 0.1, "4": 0.2, "5": 0.4 }
   },
   "anger": {
-    "maximum": 3
+    "maximum": 10,
+    "displayCapBeforeBonus": 9
   },
   "stompFeature": {
     "stompReelSize": { "2": 1, "3": 1 },
@@ -76,9 +93,41 @@
     "odds": 0.5,
     "crushAmount": {"1": 1, "2": 1, "3": 1 }
   },
+  "bonusTriggerOdds": {
+    "0": 0,
+    "1": 99,
+    "2": 99,
+    "3": 99,
+    "4": 99,
+    "5": 99,
+    "6": 100
+  },
+  "bonusTriggerOddsReal": {
+    "0": 0,
+    "1": 5,
+    "2": 10,
+    "3": 15,
+    "4": 25,
+    "5": 50,
+    "6": 100
+  },
+  "angerMeterTickOdds": 0.75,
+  "damageMultilpierStepOdds": 0.75,
+  "ouchStompFeature": {
+    "stepIntervalMs": 1800,
+    "maxCoinsPerStep": 20
+  },
   "animalSymbols": [1, 2, 3, 4, 5],
   "bonus": {
-    "freespins": 3
+    "freespins": 3,
+    "lives": 3,
+    "emptySymbol": 0,
+    "trapSymbols": [666, 777, 888, 999],
+    "damageSymbol": 1000,
+    "trapLightsRequired": 4,
+    "maxSpins": 250,
+    "guaranteedPowerSeedSpins": 2,
+    "guaranteedPowerSeedSymbols": [111, 222, 333, 444, 555]
   },
   "maxCascadesPerSpin": 100,
   "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "stompEntry", "crushEntry"],
@@ -122,15 +171,45 @@
     "isBonus": false,
     "bonusState": {
       "initialFreespins": 0,
-      "finalFreespins": 0
+      "finalFreespins": 0,
+      "livesRemaining": 0,
+      "livesBeforeSpin": 0,
+      "livesAfterSpend": 0,
+      "maxLives": 3,
+      "spinsPlayed": 0,
+      "resetLives": false
+    },
+    "bonusLandings": [],
+    "trapMeter": {
+      "progress": {
+        "666": 0,
+        "777": 0,
+        "888": 0,
+        "999": 0
+      },
+      "required": 4,
+      "values": {
+        "666": 5,
+        "777": 10,
+        "888": 25,
+        "999": 50
+      },
+      "power": 0
+    },
+    "damageWheel": {
+      "segments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
+      "removedSegments": [],
+      "remainingSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100]
     },
     "anger": 0,
     "angerMeter": {
       "count": 0,
-      "max": 3
+      "max": 10
     },
+    "animalKillEvents": [],
     "stompEvent": null,
     "crushEvent": null,
+    "ouchStompEvent": null,
     "roundSummary": null
   }
 }

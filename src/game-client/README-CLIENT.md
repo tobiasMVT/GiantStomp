@@ -9,23 +9,57 @@ The client accepts `spin`, `respin`, `bonustransition`, `freespin`, and `freeres
 - `reels`, `reelsBeforeDrop`, and `reelsAfterDrop` describe five reels with three rows.
 - `dropEvent.movements` describes downward cascade movement.
 - wins come from `waysWins`; `clusters[*].positions` remains a compatibility fallback.
-- scatter symbol `8` landings come from `scatterLandings`.
-- `angerMeter` is `{ count, max }` and is displayed as three visual segments.
-- `bonusState` supplies remaining/initial freespins.
+- `angerMeter` is `{ count, max }` with a 10-step fake display driven by crushed animals.
+- Scatters still land visually via `scatterLandings`, but they no longer charge Anger.
+- `bonusState` supplies cash-game lives and spin count.
+- `bonusLandings` supplies per-cell cash wins and trap collection steps.
+- `trapMeter` supplies four-light progress, completion values, and accumulated trap power.
+- `damageWheel` supplies configured, removed, and remaining damage segments.
+- `ouchStompEvent` on the final bonus spin supplies pre-calculated trap-resolution steps, win amounts, and pacing hints for the ouch stomp scene.
 
 ## Responsibilities
 
 - `Client.js` selects the action flow, maintains round lifecycle emits, switches bonus theme/counter state, and forwards fast-forward requests.
 - `buildSegmentFlow.js` defines the shared skippable drop/cascade, scatter, win, explosion, and count-up sequence.
 - `GameScene.js` owns the 5×3 board, Phaser animation, sound, themes, meter, counter, and responsive bounds.
-- `queueGameSceneAssets.js` queues only symbols 1–8, the two backgrounds, and presentation audio.
+- `queueGameSceneAssets.js` queues the main and bonus symbols, backgrounds, feature art, and presentation audio.
 - `config/layoutMetrics.js` is the single board-coordinate source.
 
 ## Presentation
 
-A full spin moves the old board down and out, then stagger-drops a complete board from above. Respins preserve and move existing sprites according to `dropEvent.movements`, create incoming symbols above the board, and reconcile against `reelsAfterDrop`.
+A main-game spin moves the old board down and out, then stagger-drops a complete board from above. Respins preserve and move existing sprites according to `dropEvent.movements`, create incoming symbols above the board, and reconcile against `reelsAfterDrop`.
 
-Win positions pulse, tint, explode, and are removed before the next cascade. Scatter landings pulse one at a time, update the Anger meter, and then remain visibly dimmed as consumed symbols if a cascade moves them. Main and bonus use the same board flow; bonus transition only changes background, music, and freespin counter.
+Each newly landed scatter still animates, but bonus entry now comes from crushed animals.
+On stomp impact every crushed cell dies, bleeds, and drops coins together while anger
+embers fly in parallel; meter segments only fill on successful server ticks. Bonus entry
+then overcharges the meter one step at a time to 10 with streams from every kill point.
+
+The bonus crossfades to `background_bonus.png` while retaining the reel frame. Its
+`freespin` action uses a reel-spin presentation and the `111`–`999` bonus symbol art;
+`0` renders as an empty cell. Cash symbols `111`–`555` overlay `client_config.bonusWinAmounts`
+on the icon (keep those values in sync with `server_config.bonusWinAmounts`). The bonus UI replaces Anger with a three-segment life
+meter built from `life1`/`life2`/`life3`, large collectors for `666`/`777`/`888`/`999`,
+an uncapped trap-power readout whose text heats from green through yellow to red, and
+a green/yellow/red segmented Damage Multiplier whose segment count follows the server
+damage-wheel values.
+
+A bonus spin darkens the spent life segment up front, so the meter never spoils the
+outcome. The first presented landing relights the meter to full and the flow waits for
+that lit pop before continuing, keeping the spend and the refill visually separate. A
+collector awards its value on the fourth light and then resets its own lights. Every
+landed bonus item is pulled out of the masked reels and arced down into the wide hole
+area painted on the bonus background, which kicks up a heavy cartoon dust cloud before
+its trap, power, or multiplier state updates.
+Damage Multiplier segments are dark apart from the current leftmost value; symbol
+`1000` consumes that segment and the rest fall left to close the gap. Trap power is
+presentation state during bonus spins; it credits through the ouch stomp at bonus exit.
+
+When bonus lives are exhausted, the client crossfades to `ouch_background.png`, runs a
+fake doll spin, then `presentOuchStompSequence`. The foot slams the camouflaged trap with
+a large leaf/twig debris burst (`ouch_stomp1/2` + `ouch_background-music`). Each server
+step scrolls the pit upward, advances the damage meter, drops win coins (up to 20 per
+step), and ticks the count-up to `trapPower × multiplier`. Extra steps wait
+`stepIntervalMs`, play random pain screams and gore SFX, and spawn heavy blood/gibs.
 
 ## Skip model
 

@@ -10,9 +10,10 @@ The previous feature-module facade has been removed. `GameScene.js` is now a com
 
 - `spin`: leave bonus if needed, reset win, slide old board out, full-board drop
 - `respin`: apply downward `dropEvent.movements`
-- `bonustransition`: crossfade bonus background/theme and initialize the freespin counter
-- `freespin`: update counter, full-board drop using the shared flow
-- `freerespin`: update counter, cascade using the shared flow
+- `bonustransition`: crossfade bonus background/theme and initialize lives/trap meters
+- `freespin`: spin the bonus reels, reveal cash, update lives, and collect traps
+- bonus exit (after last `freespin` with `nextAction === "spin"`): ouch background, fake spin, `presentOuchStompSequence`
+- `freerespin`: legacy compatibility only; the cash bonus does not cascade
 
 All board actions then use the same optional scatter/Anger presentation, reveal checkpoint, ways-win highlight, explosion, and count-up.
 
@@ -20,7 +21,10 @@ All board actions then use the same optional scatter/Anger presentation, reveal 
 
 - `reelSprites[reel][row]`: canonical visible board sprites
 - `angerMeterState`: current server meter projection
-- `freespinCounterValue`: framework and local counter value
+- `freespinCounterValue`: framework-compatible projection of current bonus lives
+- `trapMeterState`: four-light trap progress, completion values, and cumulative trap power
+- `damageMeterState`: configured, removed, and remaining segments rendered by the damage meter
+- `isPostBonusOuch` / `ouchScrollY`: pit descent offset during trap resolution
 - `isInBonusMode`: background/music mode only
 - `presentationWaits` / `activeTweens`: fast-forward cleanup
 - `layoutSnapshot`: responsive camera projection supplied by the framework

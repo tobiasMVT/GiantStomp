@@ -13,6 +13,8 @@ The active prototype is a 5-reel by 3-row, 243-ways cascading slot. The old hous
 
 Each newly landed scatter charges one of three Anger segments once within the same paid round (from `spin` through cascades until the next `spin`). Full Anger resets and enters a temporary three-freespin bonus shell.
 
+**Current prototype:** bonus entry is driven by crushed animals and a fake 10-step Anger display, not scatters.
+
 **Bonus:** Three freespins using the same 5x3 ways and cascade loop. Special bonus symbols and recharge rules are deferred.
 
 ## System Skills

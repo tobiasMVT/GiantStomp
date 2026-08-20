@@ -53,12 +53,45 @@
     "scatterLandings": [],
     "angerMeter": {
       "count": 0,
-      "max": 3
+      "max": 10
     },
     "bonusState": {
       "remaining": 0,
-      "initial": 0
+      "initial": 0,
+      "livesRemaining": 0,
+      "maxLives": 3,
+      "spinsPlayed": 0,
+      "resetLives": false
+    },
+    "bonusLandings": [],
+    "trapMeter": {
+      "progress": {
+        "666": 0,
+        "777": 0,
+        "888": 0,
+        "999": 0
+      },
+      "required": 4,
+      "values": {
+        "666": 5,
+        "777": 10,
+        "888": 25,
+        "999": 50
+      },
+      "power": 0
+    },
+    "damageWheel": {
+      "segments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
+      "removedSegments": [],
+      "remainingSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100]
     }
+  },
+  "bonusWinAmounts": {
+    "111": 0.1,
+    "222": 0.2,
+    "333": 0.3,
+    "444": 0.4,
+    "555": 0.5
   },
   "payoutSymbols": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   "symbolsMapping": {

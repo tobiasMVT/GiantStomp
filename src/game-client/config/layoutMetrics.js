@@ -13,9 +13,16 @@ const PRESENTATION_BAND_BOTTOM_PX = 126;
 const GAME_LOGICAL_WIDTH = GRID_WIDTH_PX + GRID_OFFSET_X * 2;
 const GAME_LOGICAL_HEIGHT = GRID_OFFSET_Y + GRID_HEIGHT_PX + PRESENTATION_BAND_BOTTOM_PX;
 
+const getRowYOffset = (row) => {
+  const topRow = clientConfig.area.height - 1;
+  if (row === topRow) return -10;
+  if (row === 0) return 10;
+  return 0;
+};
+
 const getCellCenter = (reel, row) => ({
   x: REEL_ORIGIN_X + reel * CELL_SIZE + CELL_SIZE / 2,
-  y: REEL_ORIGIN_Y + (clientConfig.area.height - 1 - row) * CELL_SIZE + CELL_SIZE / 2,
+  y: REEL_ORIGIN_Y + (clientConfig.area.height - 1 - row) * CELL_SIZE + CELL_SIZE / 2 + getRowYOffset(row),
 });
 
 const getCountUpAnchor = () => ({
@@ -28,6 +35,11 @@ const getGridBottomY = () => REEL_ORIGIN_Y + GRID_HEIGHT_PX;
 // Inner playable grid rect within reel_frame.png (1340×1043), normalized 0–1.
 const REEL_FRAME_INNER_NORM = { x: 0.06, y: 0.15, width: 0.88, height: 0.73 };
 const REEL_FRAME_OFFSET_Y = -14;
+const BONUS_BACKGROUND_OFFSET_Y = 30;
+const OUCH_BACKGROUND_OFFSET_Y = 270;
+const OUCH_BACKGROUND_SCALE = 1.2;
+const OUCH_STOMP_OFFSET_X = 50;
+const OUCH_PIT_STEP_DELTA_Y = 88;
 
 const layoutReelFrame = (image, source) => {
   const innerW = source.width * REEL_FRAME_INNER_NORM.width;
@@ -60,4 +72,9 @@ export {
   getCountUpAnchor,
   getGridBottomY,
   layoutReelFrame,
+  BONUS_BACKGROUND_OFFSET_Y,
+  OUCH_BACKGROUND_OFFSET_Y,
+  OUCH_BACKGROUND_SCALE,
+  OUCH_STOMP_OFFSET_X,
+  OUCH_PIT_STEP_DELTA_Y,
 };

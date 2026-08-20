@@ -31,11 +31,19 @@ export class Client {
       this.scene.emitOutcomeRevealed?.();
     } else if (action === "freespin" || action === "freerespin") {
       this.scene.startBonusTheme?.();
-      this.scene.updateFreespinCounter?.(this.scene.getRemainingFreespins(gameState));
+      this.scene.beginBonusSpin?.(gameState.bonusState);
     }
 
     if (BOARD_ACTIONS.has(action)) {
       await this.runSegmentFlow(gameState);
+    }
+
+    if (
+      (action === "freespin" || action === "freerespin")
+      && gameState.nextAction === "spin"
+      && this.scene.isInBonusMode
+    ) {
+      await this.scene.presentBonusExitSequence?.(gameState);
     }
 
     if (gameState.nextAction === "spin") {
