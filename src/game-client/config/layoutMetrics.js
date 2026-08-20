@@ -40,6 +40,7 @@ const OUCH_BACKGROUND_OFFSET_Y = 270;
 const OUCH_BACKGROUND_SCALE = 1.2;
 const OUCH_STOMP_OFFSET_X = 50;
 const OUCH_PIT_STEP_DELTA_Y = 88;
+const OUCH_UI_OFFSET_Y = 50;
 
 const layoutReelFrame = (image, source) => {
   const innerW = source.width * REEL_FRAME_INNER_NORM.width;
@@ -77,4 +78,5 @@ export {
   OUCH_BACKGROUND_SCALE,
   OUCH_STOMP_OFFSET_X,
   OUCH_PIT_STEP_DELTA_Y,
+  OUCH_UI_OFFSET_Y,
 };
