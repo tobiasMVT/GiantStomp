@@ -40,7 +40,7 @@ The bonus crossfades to `background_bonus.png` while retaining the reel frame. I
 on the icon (keep those values in sync with `server_config.bonusWinAmounts`). The bonus UI replaces Anger with a three-segment life
 meter built from `life1`/`life2`/`life3`, large collectors for `666`/`777`/`888`/`999`,
 an uncapped trap-power readout whose text heats from green through yellow to red, and
-a green/yellow/red segmented Damage Multiplier whose segment count follows the server
+a green/yellow/red segmented Multiplier whose segment count follows the server
 damage-wheel values.
 
 A bonus spin darkens the spent life segment up front, so the meter never spoils the
@@ -50,14 +50,17 @@ collector awards its value on the fourth light and then resets its own lights. E
 landed bonus item is pulled out of the masked reels and arced down into the wide hole
 area painted on the bonus background, which kicks up a heavy cartoon dust cloud before
 its trap, power, or multiplier state updates.
-Damage Multiplier segments are dark apart from the current leftmost value; symbol
-`1000` consumes that segment and the rest fall left to close the gap. Trap power is
-presentation state during bonus spins; it credits through the ouch stomp at bonus exit.
+Multiplier segments stay fixed in place; passed values keep their hue but render faded,
+while the active segment is fully lit. Symbol `1000` advances the meter one step. Trap
+power is presentation state during bonus spins; it credits through the ouch stomp at
+bonus exit.
 
 When bonus lives are exhausted, the client crossfades to `ouch_background.png`, runs a
 fake doll spin, then `presentOuchStompSequence`. The foot slams the camouflaged trap with
-a large leaf/twig debris burst (`ouch_stomp1/2` + `ouch_background-music`). Each server
-step scrolls the pit upward, advances the damage meter, drops win coins (up to 20 per
+a large leaf/twig debris burst (`ouch_stomp1/2` + `ouch_background-music`). Any multiplier
+segments already passed during bonus then replay as fast foot re-stomps (lift, slam, pit
+scroll, meter advance) before the server-resolved ouch steps begin. Each server step
+scrolls the pit upward, advances the multiplier meter, drops win coins (up to 20 per
 step), and ticks the count-up to `trapPower × multiplier`. Extra steps wait
 `stepIntervalMs`, play random pain screams and gore SFX, and spawn heavy blood/gibs.
 

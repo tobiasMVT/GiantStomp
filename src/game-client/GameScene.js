@@ -31,6 +31,48 @@ const CASH_BONUS_SYMBOLS = new Set([111, 222, 333, 444, 555]);
 const TRAP_SYMBOLS = [666, 777, 888, 999];
 const DAMAGE_SYMBOL = 1000;
 const DEFAULT_DAMAGE_METER_SEGMENTS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+
+function getMultiplierSegmentColor(index, total) {
+  const ratio = total <= 1 ? 0 : index / (total - 1);
+  const stops = [
+    { at: 0, color: 0x22c55e },
+    { at: 0.22, color: 0x84cc16 },
+    { at: 0.42, color: 0xeab308 },
+    { at: 0.62, color: 0xf97316 },
+    { at: 0.82, color: 0xef4444 },
+    { at: 1, color: 0xb91c1c },
+  ];
+  let left = stops[0];
+  let right = stops.at(-1);
+  for (let stopIndex = 0; stopIndex < stops.length - 1; stopIndex += 1) {
+    if (ratio >= stops[stopIndex].at && ratio <= stops[stopIndex + 1].at) {
+      left = stops[stopIndex];
+      right = stops[stopIndex + 1];
+      break;
+    }
+  }
+  const span = Math.max(0.0001, right.at - left.at);
+  const localRatio = (ratio - left.at) / span;
+  const from = Phaser.Display.Color.ValueToColor(left.color);
+  const to = Phaser.Display.Color.ValueToColor(right.color);
+  const blended = Phaser.Display.Color.Interpolate.ColorWithColor(
+    from,
+    to,
+    100,
+    Math.round(localRatio * 100)
+  );
+  return Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b);
+}
+
+function blendMultiplierColor(colorInt, factor) {
+  const segment = Phaser.Display.Color.ValueToColor(colorInt);
+  const base = Phaser.Display.Color.ValueToColor(0x0a0e12);
+  return Phaser.Display.Color.GetColor(
+    Math.round(base.r + (segment.r - base.r) * factor),
+    Math.round(base.g + (segment.g - base.g) * factor),
+    Math.round(base.b + (segment.b - base.b) * factor)
+  );
+}
 const LIFE_SEGMENT_SCALE = 0.3;
 const ANGER_SEGMENT_COUNT = 10;
 const CONSTRUCTION_SFX = ["construction_1", "construction_2", "construction_3"];
@@ -131,6 +173,7 @@ export class GameScene extends Phaser.Scene {
     this.ouchScrollY = 0;
     this.ouchTheme = null;
     this.ouchFoot = null;
+    this.ouchFadeOverlay = null;
     this.musicMuted = false;
     this.activeAnimalCrushSfx = null;
     this.activeOuchLaughSfx = null;
@@ -149,6 +192,7 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
     this.damageMeterSlots = [];
+    this.damageMeterActiveIndex = 0;
     this.damageMeterState = {
       segments: [...DEFAULT_DAMAGE_METER_SEGMENTS],
       removedSegments: [],
@@ -352,7 +396,7 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xd8c26a, 0.6)
       .setDepth(DEPTH.ui - 1);
     this.damageMeterObjects.push(panel);
-    const title = this.add.text(centerX, bottom + 111, "DAMAGE MULTIPLIER", {
+    const title = this.add.text(centerX, bottom + 111, "MULTIPLIER", {
       fontFamily: "Arial Black, Arial",
       fontSize: "12px",
       color: "#fff0bf",
@@ -363,16 +407,7 @@ export class GameScene extends Phaser.Scene {
 
     values.forEach((value, index) => {
       const slot = this.damageMeterSlots[index];
-      const ratio = index / Math.max(1, values.length - 1);
-      const from = Phaser.Display.Color.ValueToColor(ratio < 0.5 ? 0x26d07c : 0xffd166);
-      const to = Phaser.Display.Color.ValueToColor(ratio < 0.5 ? 0xffd166 : 0xef476f);
-      const color = Phaser.Display.Color.Interpolate.ColorWithColor(
-        from,
-        to,
-        100,
-        Math.round((ratio < 0.5 ? ratio * 2 : (ratio - 0.5) * 2) * 100)
-      );
-      const activeColor = Phaser.Display.Color.GetColor(color.r, color.g, color.b);
+      const activeColor = getMultiplierSegmentColor(index, values.length);
       const marker = this.add.rectangle(slot.x, slot.y, segmentWidth, 24, 0x111923, 0.94)
         .setStrokeStyle(2, activeColor, 0.74)
         .setDepth(DEPTH.ui);
@@ -391,93 +426,220 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterObjects.forEach((object) => object.setVisible(this.isInBonusMode));
   }
 
+  getDamageMeterActiveIndex(damageWheel = {}) {
+    const segments = Array.isArray(damageWheel?.segments) && damageWheel.segments.length
+      ? damageWheel.segments.map(Number)
+      : (this.damageMeterValues || DEFAULT_DAMAGE_METER_SEGMENTS);
+    const remaining = Array.isArray(damageWheel?.remainingSegments)
+      ? damageWheel.remainingSegments.map(Number)
+      : segments;
+    if (!remaining.length) return segments.length;
+    const index = segments.findIndex((value) => Number(value) === Number(remaining[0]));
+    return index >= 0 ? index : Math.max(0, segments.length - remaining.length);
+  }
+
   applyDamageMeterHighlight(activeIndex = 0) {
+    this.damageMeterActiveIndex = activeIndex;
     this.damageMeterHighlightIndex = activeIndex;
     this.damageMeterEntries.forEach((entry, index) => {
+      const isPassed = index < activeIndex;
       const isActive = index === activeIndex;
       const isNext = index === activeIndex + 1;
-      entry.marker
-        ?.setFillStyle(
-          isActive ? entry.activeColor : (isNext ? 0x262c36 : 0x090d12),
-          isActive ? 1 : (isNext ? 0.96 : 0.98)
-        )
-        .setStrokeStyle(
-          isActive ? 3 : (isNext ? 2 : 1),
-          isActive ? 0xffffff : (isNext ? entry.activeColor : 0x1a2028),
-          isActive ? 1 : (isNext ? 0.88 : 0.42)
-        )
-        .setAlpha(isActive ? 1 : (isNext ? 0.9 : 0.28));
-      entry.label
-        ?.setAlpha(isActive ? 1 : (isNext ? 0.72 : 0.14))
-        .setScale(isActive ? 1.08 : (isNext ? 1.02 : 0.96));
-    });
-  }
+      let fillColor;
+      let fillAlpha;
+      let strokeColor;
+      let strokeWidth;
+      let strokeAlpha;
+      let markerAlpha;
+      let labelAlpha;
+      let labelScale;
 
-  async pulseDamageMeterHighlight(activeIndex = 0) {
-    this.applyDamageMeterHighlight(activeIndex);
-    const entry = this.damageMeterEntries[activeIndex];
-    if (!entry) return;
-    await Promise.all([entry.marker, entry.label].filter(Boolean).map((object) => this.tweenPromise({
-      targets: object,
-      scaleX: object.scaleX * 1.18,
-      scaleY: object.scaleY * 1.18,
-      duration: 180,
-      yoyo: true,
-      ease: "Back.easeOut",
-    })));
-  }
-
-  layoutDamageMeter({ animate = false } = {}) {
-    this.layoutDamageMeterChrome();
-    const yOffset = this.getOuchUiYOffset();
-    const tweens = this.damageMeterEntries.map((entry, index) => {
-      const slot = this.damageMeterSlots[index];
-      if (!slot) return Promise.resolve();
-      const slotY = slot.y + yOffset;
-      if (!animate) {
-        entry.marker?.setPosition(slot.x, slotY);
-        entry.label?.setPosition(slot.x, slotY);
-        return Promise.resolve();
+      if (isPassed) {
+        fillColor = blendMultiplierColor(entry.activeColor, 0.44);
+        fillAlpha = 0.78;
+        strokeColor = entry.activeColor;
+        strokeWidth = 1;
+        strokeAlpha = 0.42;
+        markerAlpha = 0.82;
+        labelAlpha = 0.56;
+        labelScale = 0.94;
+      } else if (isActive) {
+        fillColor = entry.activeColor;
+        fillAlpha = 1;
+        strokeColor = 0xffffff;
+        strokeWidth = 3;
+        strokeAlpha = 1;
+        markerAlpha = 1;
+        labelAlpha = 1;
+        labelScale = 1.08;
+      } else if (isNext) {
+        fillColor = blendMultiplierColor(entry.activeColor, 0.32);
+        fillAlpha = 0.94;
+        strokeColor = entry.activeColor;
+        strokeWidth = 2;
+        strokeAlpha = 0.82;
+        markerAlpha = 0.96;
+        labelAlpha = 0.84;
+        labelScale = 1.02;
+      } else {
+        fillColor = blendMultiplierColor(entry.activeColor, 0.2);
+        fillAlpha = 0.9;
+        strokeColor = entry.activeColor;
+        strokeWidth = 1;
+        strokeAlpha = 0.36;
+        markerAlpha = 0.72;
+        labelAlpha = 0.42;
+        labelScale = 0.96;
       }
-      return Promise.all([entry.marker, entry.label].filter(Boolean).map((object) => this.tweenPromise({
-        targets: object,
-        x: slot.x,
-        y: slotY,
-        duration: 260,
-        delay: index * 22,
-        ease: "Cubic.easeOut",
-      })));
-    });
-    this.applyDamageMeterHighlight();
-    return Promise.all(tweens);
-  }
 
-  removeDamageMeterEntry(index) {
-    const entry = this.damageMeterEntries[index];
-    if (!entry) return;
-    this.damageMeterEntries.splice(index, 1);
-    [entry.marker, entry.label].filter(Boolean).forEach((object) => {
-      this.damageMeterObjects = this.damageMeterObjects.filter((item) => item !== object);
-      object.destroy();
+      entry.marker
+        ?.setFillStyle(fillColor, fillAlpha)
+        .setStrokeStyle(strokeWidth, strokeColor, strokeAlpha)
+        .setAlpha(markerAlpha);
+      entry.label
+        ?.setAlpha(labelAlpha)
+        .setScale(labelScale);
     });
     this.refreshTrapPowerDisplay();
   }
 
-  async popDamageMeterSegment(value) {
-    const index = this.damageMeterEntries.findIndex((entry) => Number(entry.value) === Number(value));
-    const entry = this.damageMeterEntries[index >= 0 ? index : 0];
+  async pulseDamageMeterHighlight(activeIndex = 0, { fast = false } = {}) {
+    this.applyDamageMeterHighlight(activeIndex);
+    const entry = this.damageMeterEntries[activeIndex];
     if (!entry) return;
+    const scaleBoost = fast ? 1.08 : 1.14;
+    const duration = fast ? 68 : 140;
     await Promise.all([entry.marker, entry.label].filter(Boolean).map((object) => this.tweenPromise({
       targets: object,
-      scaleX: 1.8,
-      scaleY: 1.8,
-      alpha: 0,
-      duration: 190,
-      ease: "Quad.easeOut",
+      scaleX: object.scaleX * scaleBoost,
+      scaleY: object.scaleY * scaleBoost,
+      duration,
+      yoyo: true,
+      ease: fast ? "Quad.easeOut" : "Back.easeOut",
     })));
-    this.removeDamageMeterEntry(index >= 0 ? index : 0);
-    await this.layoutDamageMeter({ animate: true });
+  }
+
+  layoutDamageMeter() {
+    this.layoutDamageMeterChrome();
+    const yOffset = this.getOuchUiYOffset();
+    this.damageMeterEntries.forEach((entry, index) => {
+      const slot = this.damageMeterSlots[index];
+      if (!slot) return;
+      const slotY = slot.y + yOffset;
+      entry.marker?.setPosition(slot.x, slotY);
+      entry.label?.setPosition(slot.x, slotY);
+    });
+    this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+  }
+
+  async advanceDamageMeterSegment(_value) {
+    const activeIndex = this.damageMeterActiveIndex ?? 0;
+    const entry = this.damageMeterEntries[activeIndex];
+    if (!entry) return;
+    await this.pulseDamageMeterHighlight(activeIndex);
+    const nextIndex = activeIndex + 1;
+    if (nextIndex <= this.damageMeterEntries.length) {
+      this.applyDamageMeterHighlight(nextIndex);
+    }
     await this.bopTrapPowerDisplay();
+  }
+
+  async advanceDamageMeterForOuchStep() {
+    const nextIndex = (this.damageMeterActiveIndex ?? 0) + 1;
+    this.applyDamageMeterHighlight(nextIndex);
+  }
+
+  async presentOuchFootRecoilStomp(impact = {}, { fast = false } = {}) {
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot || foot.destroyed) return;
+
+    const impactY = impact.impactY ?? (GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.58);
+    const footScale = impact.footScale ?? 1;
+    const footWidth = impact.footWidth ?? impact.bounds?.width ?? GRID_WIDTH_PX;
+    const bounds = impact.bounds;
+    const liftY = impactY - CELL_SIZE * (fast ? 0.34 : 0.72);
+    const slamY = impactY + CELL_SIZE * 0.1;
+
+    await this.tweenPromise({
+      targets: foot,
+      y: liftY,
+      scaleX: footScale * (fast ? 0.96 : 0.88),
+      scaleY: footScale * (fast ? 0.98 : 0.86),
+      duration: fast ? 52 : 170,
+      ease: "Quad.easeOut",
+    });
+
+    await this.tweenPromise({
+      targets: foot,
+      y: slamY,
+      scaleX: footScale * 1.02,
+      scaleY: footScale * 1.03,
+      duration: fast ? 38 : 185,
+      ease: "Quad.easeIn",
+    });
+
+    await this.tweenPromise({
+      targets: foot,
+      y: impactY,
+      scaleX: footScale * 1.04,
+      scaleY: footScale * 0.97,
+      duration: fast ? 26 : 68,
+      ease: "Quad.easeOut",
+    });
+
+    this.cameras.main.shake(fast ? 58 : 190, fast ? 0.006 : 0.014);
+    this.playOuchStompSfx(fast ? 0.48 : 0.82);
+    if (bounds && !fast) {
+      this.spawnOuchDebrisBurst(bounds.centerX, impactY + CELL_SIZE * 0.12, footWidth * 0.82);
+    }
+  }
+
+  async presentOuchFootPushDown(impact = {}) {
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot || foot.destroyed) return;
+
+    const impactY = impact.impactY ?? (GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.58);
+    const footScale = impact.footScale ?? 1;
+    const pushDepth = (impact.ouchPushDepth = (impact.ouchPushDepth || 0) + CELL_SIZE * 0.045);
+    const pushY = impactY + pushDepth;
+
+    await this.tweenPromise({
+      targets: foot,
+      y: pushY,
+      scaleX: footScale * 1.05,
+      scaleY: footScale * 0.93,
+      duration: 72,
+      ease: "Quad.easeIn",
+    });
+
+    this.cameras.main.shake(88, 0.007);
+    this.playOuchStompSfx(0.62);
+  }
+
+  async presentOuchPassedMultiplierReplay(targetIndex = 0, impact = {}, ouchEvent = {}) {
+    if (targetIndex <= 0 || !impact?.foot) return;
+
+    this.applyDamageMeterHighlight(0);
+    const centerX = impact.bounds?.centerX || (GRID_OFFSET_X + GRID_WIDTH_PX / 2);
+    const centerY = (impact.impactY || GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.55) + CELL_SIZE * 0.1;
+    const trapPower = Number(ouchEvent.trapPower) || Number(this.trapMeterState?.power) || 1;
+    const coinCountPerStep = Math.max(1, Number(ouchEvent.coinCountPerStep) || Math.min(Math.round(trapPower), 20));
+
+    for (let index = 0; index < targetIndex; index += 1) {
+      this.applyDamageMeterHighlight(index);
+      await this.presentOuchDamageMeterCharge(1, 0, { fast: true });
+      await this.presentOuchFootRecoilStomp(impact, { fast: true });
+      await this.pulseDamageMeterHighlight(index, { fast: true });
+      this.applyDamageMeterHighlight(index + 1);
+      this.spawnOuchPainEffects(centerX, centerY, 0.45 + index * 0.06);
+      const replayCoinCount = Phaser.Math.Clamp(Math.round(coinCountPerStep * 0.55), 4, 12);
+      const coinLaunch = this.spawnOuchWinCoins(centerX, centerY, replayCoinCount, 0);
+      await this.scrollOuchPit(undefined, { fast: true });
+      await coinLaunch;
+      await this.waitForPresentation(18, { skippable: true });
+    }
+
+    this.applyDamageMeterHighlight(targetIndex);
   }
 
   setEventBus(eventBus) {
@@ -1667,17 +1829,17 @@ export class GameScene extends Phaser.Scene {
     ].filter(Boolean);
   }
 
-  async scrollOuchPit(deltaY = OUCH_PIT_STEP_DELTA_Y) {
+  async scrollOuchPit(deltaY = OUCH_PIT_STEP_DELTA_Y, { fast = false } = {}) {
     const shift = Number(deltaY) || OUCH_PIT_STEP_DELTA_Y;
     this.ouchScrollY += shift;
     const targets = this.getOuchScrollTargets();
     await Promise.all(targets.map((target) => this.tweenPromise({
       targets: target,
       y: target.y - shift,
-      duration: 240,
+      duration: fast ? 78 : 165,
       ease: "Cubic.easeInOut",
     })));
-    this.cameras.main.shake(140, 0.0065);
+    this.cameras.main.shake(fast ? 44 : 105, fast ? 0.0028 : 0.005);
   }
 
   resetOuchPitScroll() {
@@ -1731,8 +1893,9 @@ export class GameScene extends Phaser.Scene {
     await Promise.allSettled(launches);
   }
 
-  async presentOuchDamageMeterCharge(stepNumber = 1, leadInMs = 0) {
-    const activeEntry = this.damageMeterEntries[0];
+  async presentOuchDamageMeterCharge(stepNumber = 1, leadInMs = 0, { fast = false } = {}) {
+    const activeIndex = this.damageMeterActiveIndex ?? 0;
+    const activeEntry = this.damageMeterEntries[activeIndex];
     if (!activeEntry) {
       if (leadInMs > 0) {
         await this.waitForPresentation(leadInMs, { skippable: true });
@@ -1740,11 +1903,27 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (fast) {
+      const accentTargets = [activeEntry.marker, activeEntry.label].filter(Boolean);
+      await Promise.all(accentTargets.map((target) => this.tweenPromise({
+        targets: target,
+        alpha: 0.55,
+        scaleX: target.scaleX * 1.06,
+        scaleY: target.scaleY * 1.06,
+        duration: 34,
+        yoyo: true,
+        ease: "Quad.easeOut",
+        onComplete: () => target.setAlpha(1),
+      })));
+      this.applyDamageMeterHighlight(activeIndex);
+      return;
+    }
+
     const chargeMs = Math.max(
-      stepNumber > 1 ? 760 : 420,
-      Math.min(Math.max(0, Number(leadInMs) || 0), 1500)
+      stepNumber > 1 ? 480 : 260,
+      Math.min(Math.max(0, Number(leadInMs) || 0), 900)
     );
-    const pulses = stepNumber > 1 ? [170, 130, 96, 72] : [150, 112, 84];
+    const pulses = stepNumber > 1 ? [120, 92, 68, 50] : [108, 78, 58];
     const pulseBudget = pulses.reduce((sum, value) => sum + value, 0);
     const introWait = Math.max(0, chargeMs - pulseBudget);
     if (introWait > 0) {
@@ -1782,7 +1961,7 @@ export class GameScene extends Phaser.Scene {
       } else if (isFinalPulse) {
         this.cameras.main.shake(45, 0.0012);
       }
-      this.applyDamageMeterHighlight(0);
+      this.applyDamageMeterHighlight(activeIndex);
     }
   }
 
@@ -1890,8 +2069,118 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(130, Math.min(0.012, 0.004 + intensity * 0.002));
   }
 
+  ensureOuchFadeOverlay() {
+    if (this.ouchFadeOverlay && !this.ouchFadeOverlay.destroyed) {
+      return this.ouchFadeOverlay;
+    }
+    const camera = this.cameras.main;
+    const width = Math.max(camera.width, this.scale.width) * 2.4;
+    const height = Math.max(camera.height, this.scale.height) * 2.4;
+    this.ouchFadeOverlay = this.add.rectangle(
+      camera.midPoint.x + camera.scrollX,
+      camera.midPoint.y + camera.scrollY,
+      width,
+      height,
+      0x000000,
+      1
+    )
+      .setDepth(DEPTH.ui + 60)
+      .setAlpha(0)
+      .setVisible(false);
+    return this.ouchFadeOverlay;
+  }
+
+  spawnOuchBloodPour(centerX, centerY) {
+    const groundY = this.getStompGroundY(centerY) + 48;
+    this.spawnBloodBurst(centerX, centerY, groundY, 34);
+    this.spawnBloodBurst(
+      centerX + Phaser.Math.Between(-36, 36),
+      centerY + Phaser.Math.Between(4, 18),
+      groundY,
+      26
+    );
+    this.spawnGibs(centerX, centerY, groundY, 16);
+    for (let index = 0; index < 28; index += 1) {
+      this.time?.delayedCall(index * 42, () => {
+        const x = centerX + Phaser.Math.Between(-54, 54);
+        const drop = this.add.circle(
+          x,
+          centerY + Phaser.Math.Between(-8, 20),
+          Phaser.Math.Between(4, 10),
+          Phaser.Math.RND.pick([0x8b0000, 0xc41b1b, 0xff2a2a, 0x5d0f0f]),
+          0.94
+        ).setDepth(DEPTH.stompVfx + 1);
+        this.tweenPromise({
+          targets: drop,
+          y: groundY + Phaser.Math.Between(24, 96),
+          x: x + Phaser.Math.Between(-22, 22),
+          alpha: 0,
+          scale: Phaser.Math.FloatBetween(1.1, 2.2),
+          duration: Phaser.Math.Between(360, 680),
+          ease: "Quad.easeIn",
+          onComplete: () => drop.destroy(),
+        });
+      });
+    }
+  }
+
+  playOuchLegPullScream() {
+    this.stopOuchLaughSfx();
+    GIANT_PAIN_SFX.forEach((key, index) => {
+      this.time?.delayedCall(index * 130, () => {
+        this.playSfx(key, { volume: 0.94 });
+      });
+    });
+  }
+
+  async presentOuchLegPullExit(impact = {}) {
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot || foot.destroyed) return false;
+
+    const footScale = impact.footScale ?? 1;
+    const centerX = impact.bounds?.centerX ?? foot.x;
+    const startY = foot.y;
+    const pullY = startY - CELL_SIZE * 2.15;
+    const bloodY = startY + CELL_SIZE * 0.18;
+
+    this.playOuchLegPullScream();
+    this.spawnOuchBloodPour(centerX, bloodY);
+    this.cameras.main.shake(220, 0.014);
+
+    const overlay = this.ensureOuchFadeOverlay();
+    overlay.setVisible(true).setAlpha(0);
+
+    const pullPromise = this.tweenPromise({
+      targets: foot,
+      y: pullY,
+      scaleX: footScale * 0.9,
+      scaleY: footScale * 1.06,
+      alpha: 0.72,
+      duration: 720,
+      ease: "Cubic.easeOut",
+    });
+
+    await this.waitForPresentation(260, { skippable: true });
+
+    await Promise.all([
+      pullPromise,
+      this.tweenPromise({
+        targets: overlay,
+        alpha: 1,
+        duration: 540,
+        ease: "Quad.easeIn",
+      }),
+    ]);
+
+    this.setOuchUiVisible(false);
+    foot.setVisible(false);
+    return true;
+  }
+
   async presentOuchTotalWinSequence(totalWin = 0) {
     const grandTotal = Math.max(0, Number(totalWin) || 0);
+    const overlay = this.ouchFadeOverlay;
+    const fromBlack = overlay?.visible && overlay.alpha > 0.5;
     const fadeTargets = [
       this.ouchBackground,
       this.reelFrame,
@@ -1900,13 +2189,20 @@ export class GameScene extends Phaser.Scene {
     ].filter(Boolean);
 
     this.setOuchUiVisible(false);
-    this.startOuchTheme();
-    await Promise.all([
-      this.tweenPromise({ targets: fadeTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
-      this.tweenPromise({ targets: this.totalWinBackground, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
-    ]);
-    this.ouchFoot?.destroy();
-    this.ouchFoot = null;
+    if (fromBlack) {
+      fadeTargets.forEach((target) => target?.setAlpha?.(0));
+      this.ouchFoot?.destroy();
+      this.ouchFoot = null;
+      this.totalWinBackground?.setAlpha(1);
+    } else {
+      this.startOuchTheme();
+      await Promise.all([
+        this.tweenPromise({ targets: fadeTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
+        this.tweenPromise({ targets: this.totalWinBackground, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
+      ]);
+      this.ouchFoot?.destroy();
+      this.ouchFoot = null;
+    }
 
     this.currentWin = 0;
     this.countUpLabel = "TOTAL WIN";
@@ -1916,6 +2212,16 @@ export class GameScene extends Phaser.Scene {
       ?.setAlpha(1)
       .setVisible(true);
     this.syncCountUpDisplay(0);
+
+    if (fromBlack) {
+      await this.tweenPromise({
+        targets: overlay,
+        alpha: 0,
+        duration: 480,
+        ease: "Quad.easeOut",
+        onComplete: () => overlay?.setVisible(false),
+      });
+    }
 
     const popScale = layout.amountScale * 1.08;
     await this.tweenPromise({
@@ -1948,13 +2254,13 @@ export class GameScene extends Phaser.Scene {
 
     if (stepNumber > 1) {
       await this.presentOuchDamageMeterCharge(stepNumber, stepIntervalMs);
-      this.removeDamageMeterEntry(0);
+      await this.advanceDamageMeterForOuchStep();
+      await this.presentOuchFootPushDown(impact);
       this.playSfx("wins_explode", { volume: 0.48 });
-      await this.layoutDamageMeter({ animate: true });
-      await this.pulseDamageMeterHighlight(0);
+      await this.pulseDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     } else {
-      await this.presentOuchDamageMeterCharge(stepNumber, 420);
-      await this.pulseDamageMeterHighlight(0);
+      await this.presentOuchDamageMeterCharge(stepNumber, 260);
+      await this.pulseDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     }
 
     this.spawnOuchPainEffects(centerX, centerY, 1 + (stepNumber - 1) * 0.35);
@@ -1966,15 +2272,25 @@ export class GameScene extends Phaser.Scene {
 
   async presentOuchStompSequence(ouchEvent = {}, gameState = {}) {
     if (!ouchEvent?.triggered || !Array.isArray(ouchEvent.steps) || !ouchEvent.steps.length) {
+      const damageWheel = gameState.damageWheel || {};
+      if (damageWheel.segments?.length || damageWheel.remainingSegments?.length) {
+        this.updateDamageMeter(damageWheel);
+        this.setOuchUiVisible(true);
+      }
       await this.presentStompVisual(this.getOuchStompBounds());
       return;
     }
 
     const damageWheel = ouchEvent.damageWheelBefore || gameState.damageWheel || {};
+    const meterSegments = damageWheel.segments || damageWheel.remainingSegments || DEFAULT_DAMAGE_METER_SEGMENTS;
     this.updateDamageMeter({
-      segments: damageWheel.segments || damageWheel.remainingSegments || DEFAULT_DAMAGE_METER_SEGMENTS,
+      segments: meterSegments,
       remainingSegments: damageWheel.remainingSegments || damageWheel.segments || DEFAULT_DAMAGE_METER_SEGMENTS,
       removedSegments: damageWheel.removedSegments || [],
+    });
+    const catchUpIndex = this.getDamageMeterActiveIndex({
+      segments: meterSegments,
+      remainingSegments: damageWheel.remainingSegments || damageWheel.segments || DEFAULT_DAMAGE_METER_SEGMENTS,
     });
     this.updateTrapPowerMeter(ouchEvent.trapPower || gameState.trapMeter?.power || 0);
     this.setOuchUiVisible(true);
@@ -1986,11 +2302,14 @@ export class GameScene extends Phaser.Scene {
     const impact = await this.presentOuchStompImpact(bounds);
     if (!impact) return;
 
+    await this.presentOuchPassedMultiplierReplay(catchUpIndex, impact, ouchEvent);
+
     for (const step of ouchEvent.steps) {
       await this.presentOuchStompStep(step, ouchEvent, impact);
     }
 
     await this.waitForPresentation(220, { skippable: true });
+    await this.presentOuchLegPullExit(impact);
     await this.presentOuchTotalWinSequence(gameState.twa || ouchEvent.finalWinAmount || this.currentWin);
   }
 
@@ -2590,7 +2909,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   getActiveDamageMultiplierEntry() {
-    return this.damageMeterEntries?.[0] ?? null;
+    const index = this.damageMeterActiveIndex ?? 0;
+    return this.damageMeterEntries?.[index] ?? null;
   }
 
   getActiveDamageMultiplier() {
@@ -2689,20 +3009,17 @@ export class GameScene extends Phaser.Scene {
     const remaining = Array.isArray(damageWheel?.remainingSegments)
       ? damageWheel.remainingSegments.map(Number)
       : segments;
-    if (segments.join(",") !== (this.damageMeterValues || []).join(",")
-      || remaining.length > this.damageMeterEntries.length) {
+    if (segments.join(",") !== (this.damageMeterValues || []).join(",")) {
       this.createDamageMeter(segments);
     }
-    while (this.damageMeterEntries.length > remaining.length) {
-      this.removeDamageMeterEntry(0);
-    }
+    const activeIndex = this.getDamageMeterActiveIndex({ segments, remainingSegments: remaining });
     this.layoutDamageMeter();
+    this.applyDamageMeterHighlight(activeIndex);
     this.damageMeterState = {
       segments,
       removedSegments: [...(damageWheel?.removedSegments || [])],
       remainingSegments: [...remaining],
     };
-    this.refreshTrapPowerDisplay();
   }
 
   updateBonusState(bonusState = {}, trapMeter = {}, damageWheel = {}) {
@@ -3012,7 +3329,7 @@ export class GameScene extends Phaser.Scene {
       }
       await this.suckBonusSymbolIntoHole(sprite);
       if (landing.isDamage || Number(landing.symbol) === DAMAGE_SYMBOL) {
-        await this.popDamageMeterSegment(landing.damageRemovedSegment);
+        await this.advanceDamageMeterSegment(landing.damageRemovedSegment);
         continue;
       }
 
@@ -3229,6 +3546,8 @@ export class GameScene extends Phaser.Scene {
     this.stopOuchTheme();
     this.ouchFoot?.destroy();
     this.ouchFoot = null;
+    this.ouchFadeOverlay?.destroy();
+    this.ouchFadeOverlay = null;
     this.resetOuchPitScroll();
     this.reelSprites.flat().forEach((sprite) => sprite?.setVisible(true).setAlpha(1));
     await Promise.all([
@@ -3421,10 +3740,10 @@ export class GameScene extends Phaser.Scene {
     sound.destroy();
   }
 
-  playOuchStompSfx() {
-    this.playSfx(OUCH_STOMP_SFX[0], { volume: 0.82 });
+  playOuchStompSfx(volume = 0.82) {
+    this.playSfx(OUCH_STOMP_SFX[0], { volume });
     this.time?.delayedCall(60, () => {
-      this.playSfx(OUCH_STOMP_SFX[1], { volume: 0.78 });
+      this.playSfx(OUCH_STOMP_SFX[1], { volume: volume * 0.95 });
     });
   }
 
@@ -3468,7 +3787,7 @@ export class GameScene extends Phaser.Scene {
   startBonusTheme() {
     this.mainTheme?.stop();
     if (this.musicMuted || this.bonusTheme?.isPlaying) return;
-    this.bonusTheme = this.sound.add("theme_bonus", { loop: true, volume: 0.42 });
+    this.bonusTheme = this.sound.add("theme_bonus", { loop: true, volume: 0.64 });
     this.bonusTheme.play();
   }
 

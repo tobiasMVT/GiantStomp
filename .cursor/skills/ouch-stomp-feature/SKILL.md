@@ -46,8 +46,10 @@ Triggered from `Client.reactOnResponse` when bonus ends (`nextAction === "spin"`
 1. `presentBonusExitSequence(gameState)` crossfades to `ouch_background`, fake doll spin.
 2. `presentOuchStompSequence(ouchStompEvent)`:
    - **Impact:** foot slams trap, `spawnOuchDebrisBurst`, random `ouch_stomp1/2`, start `ouch_background-music`.
-   - **Per step:** scroll pit up (`OUCH_PIT_STEP_DELTA_Y`), damage meter advance, coins → count-up ticks to `step.winAmount`.
+   - **Passed replay:** after impact, bonus-advanced multiplier segments replay as fast lift-and-slam stomps with decorative gold coins (no win credit).
+   - **Per step:** scroll pit up, advance multiplier highlight, foot pushes deeper (no lift wobble), coins → count-up ticks to `step.winAmount`.
    - **Step 2+:** wait `stepIntervalMs`, random pain scream + gore SFX, heavy blood/gibs before meter shift.
+   - **Exit:** when multiplier stops advancing, foot partially pulls out with blood pour + stacked pain screams, fade to black, then fade into total-win scene.
 3. `leaveBonus()` on next paid spin resets scroll offset and stops ouch theme.
 
 UI during ouch: damage meter + trap power readout + count-up (`setOuchUiVisible`).
