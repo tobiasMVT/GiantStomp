@@ -100,6 +100,8 @@ const DEPTH = {
 };
 const STOMP_COIN_SCALE_MIN = 0.13;
 const STOMP_COIN_SCALE_MAX = 0.15;
+const SYMBOL_LAND_EASE = "Back.easeOut";
+const SYMBOL_LAND_EASE_PARAMS = [1.08];
 
 const getReel = (reels, reel) => reels?.[reel] ?? reels?.[String(reel)] ?? [];
 const getSymbol = (reels, reel, row) => getReel(reels, reel)?.[row] ?? null;
@@ -174,6 +176,7 @@ export class GameScene extends Phaser.Scene {
     this.ouchTheme = null;
     this.ouchFoot = null;
     this.ouchFadeOverlay = null;
+    this.ouchCoinCollectQueue = null;
     this.musicMuted = false;
     this.activeAnimalCrushSfx = null;
     this.activeOuchLaughSfx = null;
@@ -616,14 +619,16 @@ export class GameScene extends Phaser.Scene {
     this.playOuchStompSfx(0.62);
   }
 
-  async presentOuchPassedMultiplierReplay(targetIndex = 0, impact = {}, ouchEvent = {}) {
+  async presentOuchPassedMultiplierReplay(targetIndex = 0, impact = {}, ouchEvent = {}, betSize = 1) {
     if (targetIndex <= 0 || !impact?.foot) return;
 
     this.applyDamageMeterHighlight(0);
     const centerX = impact.bounds?.centerX || (GRID_OFFSET_X + GRID_WIDTH_PX / 2);
     const centerY = (impact.impactY || GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.55) + CELL_SIZE * 0.1;
     const trapPower = Number(ouchEvent.trapPower) || Number(this.trapMeterState?.power) || 1;
+    const normalizedBet = Number(betSize) || 1;
     const coinCountPerStep = Math.max(1, Number(ouchEvent.coinCountPerStep) || Math.min(Math.round(trapPower), 20));
+    this.ouchCoinCollectQueue = Promise.resolve();
 
     for (let index = 0; index < targetIndex; index += 1) {
       this.applyDamageMeterHighlight(index);
@@ -632,14 +637,23 @@ export class GameScene extends Phaser.Scene {
       await this.pulseDamageMeterHighlight(index, { fast: true });
       this.applyDamageMeterHighlight(index + 1);
       this.spawnOuchPainEffects(centerX, centerY, 0.45 + index * 0.06);
+      const multiplier = Number(this.damageMeterEntries[index]?.value) || 1;
+      const stepDisplayWin = Number((trapPower * multiplier * normalizedBet).toFixed(2));
       const replayCoinCount = Phaser.Math.Clamp(Math.round(coinCountPerStep * 0.55), 4, 12);
-      const coinLaunch = this.spawnOuchWinCoins(centerX, centerY, replayCoinCount, 0);
+      const coinLaunch = this.spawnOuchWinCoins(
+        centerX,
+        centerY,
+        replayCoinCount,
+        stepDisplayWin,
+        { fast: true }
+      );
+      this.enqueueOuchCoinCollection(coinLaunch, stepDisplayWin);
       await this.scrollOuchPit(undefined, { fast: true });
-      await coinLaunch;
       await this.waitForPresentation(18, { skippable: true });
     }
 
     this.applyDamageMeterHighlight(targetIndex);
+    await this.flushOuchCoinCollection();
   }
 
   setEventBus(eventBus) {
@@ -810,6 +824,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async slideOutOldSymbols() {
+    this.clearHighlights();
     const sprites = this.reelSprites.flat().filter(Boolean);
     this.reelSprites = Array.from({ length: REELS }, () => Array(ROWS).fill(null));
     await Promise.all(sprites.map((sprite, index) => this.tweenPromise({
@@ -845,7 +860,8 @@ export class GameScene extends Phaser.Scene {
           y: target.y,
           duration: 430,
           delay: reel * 65 + row * 32,
-          ease: "Bounce.easeOut",
+          ease: SYMBOL_LAND_EASE,
+          easeParams: SYMBOL_LAND_EASE_PARAMS,
           onStart: () => this.playSfx(`land${reel + 1}`, { volume: 0.28 }),
         }));
       }
@@ -956,7 +972,8 @@ export class GameScene extends Phaser.Scene {
           y: target.y,
           duration: 330,
           delay: stopDelay + row * 28,
-          ease: "Back.easeOut",
+          ease: SYMBOL_LAND_EASE,
+          easeParams: SYMBOL_LAND_EASE_PARAMS,
           onStart: () => this.playSfx(`land${reel + 1}`, { volume: 0.3 }),
         }));
       }
@@ -1035,7 +1052,8 @@ export class GameScene extends Phaser.Scene {
           y: getCellCenter(reel, row).y,
           duration: 330,
           delay: reel * 45 + row * 24,
-          ease: "Bounce.easeOut",
+          ease: SYMBOL_LAND_EASE,
+          easeParams: SYMBOL_LAND_EASE_PARAMS,
         }));
       }
     }
@@ -1070,7 +1088,6 @@ export class GameScene extends Phaser.Scene {
       repeat: 1,
       ease: "Sine.easeInOut",
     })));
-    this.clearHighlights();
   }
 
   clearHighlights() {
@@ -1607,7 +1624,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  async collectStompCoinsToWin(targetWin = null) {
+  async collectStompCoinsToWin(targetWin = null, { fast = false } = {}) {
     await this.waitForStompCoinSettling();
 
     const coins = [...(this.stompCoinsRegistry || [])].filter((coin) => coin?.active);
@@ -1616,7 +1633,7 @@ export class GameScene extends Phaser.Scene {
     if (!coins.length || !this.countUpText) return;
 
     const now = performance.now();
-    const settleHoldMs = 180;
+    const settleHoldMs = fast ? 48 : 180;
     const restMs = Math.max(
       0,
       ...coins.map((coin) => settleHoldMs - (now - (coin.getData("landedAt") || now)))
@@ -1636,6 +1653,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    const coinDuration = fast ? 120 : 260;
+    const coinDelay = fast ? 8 : 22;
     await Promise.all(coins.map((coin, index) => new Promise((resolve) => {
       const coinValue = Number(coin.getData("coinValue")) || 0;
       this.tweenPromise({
@@ -1646,8 +1665,8 @@ export class GameScene extends Phaser.Scene {
         scaleY: 0.06,
         alpha: 0.15,
         angle: coin.angle + Phaser.Math.Between(180, 540),
-        duration: 260,
-        delay: index * 22,
+        duration: coinDuration,
+        delay: index * coinDelay,
         ease: "Cubic.easeIn",
         onComplete: () => {
           this.playSfx("wins_payout", { volume: 0.55 });
@@ -1671,9 +1690,9 @@ export class GameScene extends Phaser.Scene {
         targets: this.countUpText,
         scaleX: 1.14,
         scaleY: 1.14,
-        duration: 90,
+        duration: fast ? 48 : 90,
         yoyo: true,
-        ease: "Back.easeOut",
+        ease: fast ? "Quad.easeOut" : "Back.easeOut",
       });
     }
   }
@@ -1851,12 +1870,12 @@ export class GameScene extends Phaser.Scene {
     this.ouchScrollY = 0;
   }
 
-  async spawnOuchWinCoins(centerX, centerY, count = 1, totalWin = 0) {
+  async spawnOuchWinCoins(centerX, centerY, count = 1, totalWin = 0, { fast = false } = {}) {
     const coinCount = Math.max(1, Number(count) || 1);
     const winTotal = Number(totalWin) || 0;
     const coinValues = distributeMoneyAmount(winTotal, coinCount);
     this.ensureCoinAnimation();
-    if (!this.anims.exists("yellow_coin_spin")) return;
+    if (!this.anims.exists("yellow_coin_spin")) return Promise.resolve();
 
     const groundY = this.getStompGroundY(centerY);
     const launches = [];
@@ -1879,10 +1898,10 @@ export class GameScene extends Phaser.Scene {
         startX: coin.x,
         startY: coin.y,
         groundY: groundY + Phaser.Math.Between(-2, 8),
-        horizontalSpread: Phaser.Math.Between(80, 150),
-        launchHeight: Phaser.Math.Between(120, 180),
-        riseDuration: Phaser.Math.Between(140, 190),
-        fallDuration: Phaser.Math.Between(280, 380),
+        horizontalSpread: Phaser.Math.Between(fast ? 60 : 80, fast ? 110 : 150),
+        launchHeight: Phaser.Math.Between(fast ? 80 : 120, fast ? 130 : 180),
+        riseDuration: Phaser.Math.Between(fast ? 90 : 140, fast ? 120 : 190),
+        fallDuration: Phaser.Math.Between(fast ? 160 : 280, fast ? 220 : 380),
         trailColor: 0xffd24a,
         trailRadius: Phaser.Math.Between(3, 6),
         spinSpeed: Phaser.Math.Between(300, 560),
@@ -1890,7 +1909,23 @@ export class GameScene extends Phaser.Scene {
         onSettle: (landedCoin) => this.registerStompCoin(landedCoin),
       })));
     }
-    await Promise.allSettled(launches);
+    return Promise.allSettled(launches);
+  }
+
+  enqueueOuchCoinCollection(coinLaunchPromise, targetWin = 0) {
+    this.ouchCoinCollectQueue = (this.ouchCoinCollectQueue || Promise.resolve())
+      .then(() => coinLaunchPromise)
+      .then(() => this.collectStompCoinsToWin(targetWin, { fast: true }));
+    return this.ouchCoinCollectQueue;
+  }
+
+  async flushOuchCoinCollection() {
+    if (!this.ouchCoinCollectQueue) return;
+    try {
+      await this.ouchCoinCollectQueue;
+    } finally {
+      this.ouchCoinCollectQueue = null;
+    }
   }
 
   async presentOuchDamageMeterCharge(stepNumber = 1, leadInMs = 0, { fast = false } = {}) {
@@ -2302,7 +2337,7 @@ export class GameScene extends Phaser.Scene {
     const impact = await this.presentOuchStompImpact(bounds);
     if (!impact) return;
 
-    await this.presentOuchPassedMultiplierReplay(catchUpIndex, impact, ouchEvent);
+    await this.presentOuchPassedMultiplierReplay(catchUpIndex, impact, ouchEvent, gameState.betSize);
 
     for (const step of ouchEvent.steps) {
       await this.presentOuchStompStep(step, ouchEvent, impact);
@@ -2695,7 +2730,6 @@ export class GameScene extends Phaser.Scene {
       : Promise.resolve();
 
     await Promise.all([crushTween, angerPromise]);
-    this.cameras.main.shake(220, 0.009);
   }
 
   getCrushHandExitX(enterX) {
@@ -2771,6 +2805,7 @@ export class GameScene extends Phaser.Scene {
 
     await this.presentMiniSqueezeShake(openHand, 300);
     this.syncCrushHandPair(openHand, snappedHand);
+    this.cameras.main.shake(220, 0.009);
     await this.crossfadeCrushHand(openHand, snappedHand, 130);
     if (isFirstGrab) this.playGiantLaughSfx();
     await this.crushGrabbedSymbol(sprite, target.x, target.y, cell, killEvent);
@@ -3430,12 +3465,25 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
   }
 
-  async updateCountUp(targetValue = 0, { duration = 420 } = {}) {
-    await this.collectStompCoinsToWin();
+  getMainCountUpDuration(targetValue = 0, currentValue = this.currentWin) {
+    const target = Math.max(0, Number(targetValue) || 0);
+    const current = Math.max(0, Number(currentValue) || 0);
+    const delta = Math.max(0, target - current);
+    return Phaser.Math.Clamp(80 + delta * 18, 80, 180);
+  }
+
+  async updateCountUp(targetValue = 0, { duration = 420, fast = false } = {}) {
+    await this.collectStompCoinsToWin(null, { fast });
 
     const target = Number(targetValue) || 0;
     if (target <= 0 && this.currentWin <= 0) {
       this.syncCountUpDisplay(0);
+      return;
+    }
+
+    if (Math.abs(target - this.currentWin) < 0.005) {
+      this.currentWin = target;
+      this.syncCountUpDisplay(target);
       return;
     }
 
@@ -3445,7 +3493,7 @@ export class GameScene extends Phaser.Scene {
       targets: counter,
       value: target,
       duration,
-      ease: "Cubic.easeOut",
+      ease: fast ? "Quad.easeOut" : "Cubic.easeOut",
       onUpdate: () => this.syncCountUpDisplay(counter.value),
       onComplete: () => {
         this.currentWin = target;

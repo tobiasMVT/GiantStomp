@@ -9,7 +9,7 @@ The active prototype is a 5-reel by 3-row, 243-ways cascading slot. The old hous
 
 ## Core Loop
 
-**Main game:** Spin → evaluate ways → explode all winning positions → downward respin → repeat until no win.
+**Main game:** Spin → evaluate ways → highlight wins (symbols stay) → next spin or bonus entry.
 
 Each newly landed scatter charges one of three Anger segments once within the same paid round (from `spin` through cascades until the next `spin`). Full Anger resets and enters a temporary three-freespin bonus shell.
 

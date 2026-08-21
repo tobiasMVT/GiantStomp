@@ -18,20 +18,21 @@ description: Maintains the 5x3, 243-ways cascade engine, scatter consumption, An
 - Require at least three matching reels and use only the longest 3/4/5-reel award.
 - `ways` is the product of matching symbol counts on each involved reel.
 - `tbm = paytable[symbol][reelCount] * ways`; currency payout is `tbm * betSize`.
-- Remove the union of all positions in every ways win before applying gravity.
-- Return positions explicitly. The client must not reconstruct wins from displayed sprites.
+- Winning symbols remain on the board; return positions explicitly for client highlight.
+- The client must not reconstruct wins from displayed sprites.
 
 ## Action flow
 
 Main game:
 
-`spin -> respin while wins remain -> bonustransition or spin`
+`spin -> bonustransition or spin`
 
 Bonus:
 
-`freespin -> freerespin while wins remain -> freespin while spins remain -> spin`
+`freespin -> freespin while spins remain -> spin`
 
-Initial `spin` and `freespin` use the full-board top drop. `respin` and `freerespin` use `dropEvent.movements`.
+Initial `spin` and `freespin` use the full-board top drop. Legacy `respin` / `freerespin`
+client segments remain for compatibility but the server no longer emits them.
 
 ## Bonus entry and fake Anger
 
@@ -40,7 +41,7 @@ Initial `spin` and `freespin` use the full-board top drop. `respin` and `freeres
 - After the feature resolves, roll `bonusTriggerOdds[killCount]` (capped by config keys).
 - Each animal kill may also tick the fake Anger display using `angerMeterTickOdds`.
 - Display cap before bonus is `anger.displayCapBeforeBonus` (default 9 on a 10-step meter).
-- When bonus triggers, the action reports `angerMeter.count = 10`, latches bonus, and cascades stop immediately.
+- When bonus triggers, the action reports `angerMeter.count = 10`, latches bonus, and the round ends after that spin.
 - `animalKillEvents` on the action/stomp/crush payload drives client meter ticks per crushed animal.
 - Client Anger display persists across paid spins; reset only in `GameScene.leaveBonus()`.
 - Server `ticked` is authoritative; client increments its own display count on tick (do not sync `displayAfter` from server each spin).
@@ -48,7 +49,7 @@ Initial `spin` and `freespin` use the full-board top drop. `respin` and `freeres
 ## Client rules
 
 - `Client` owns action sequencing; `GameScene` owns animation.
-- Main and bonus use the same board drop, ways highlight, explosion, and gravity primitives.
+- Main and bonus use the same board drop, ways highlight, and count-up primitives (no explosion or cascade).
 - Keep `reelSprites[reel][row]` aligned with server state.
 - Animate fake Anger from `animalKillEvents` during stomp/crush presentation; coin drop, blood, and anger embers start at the kill moment.
 - When bonus triggers, overcharge fills remaining meter steps on the bar only (no extra kill-position embers); pacing accelerates from a slow beat into a burst.

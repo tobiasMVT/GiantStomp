@@ -93,15 +93,12 @@ export function buildSegmentFlow({
       onSkipAction: () => scene.skipHighlightPhase?.(),
     },
     {
-      checkpoint: false,
-      enabled: hasWins,
-      run: () => scene.explodeWins(gameState),
-      onSkipAction: skipVisual,
-    },
-    {
       checkpoint: true,
       enabled: !isBonusCashSpin,
-      run: () => scene.updateCountUp(gameState.twa || 0),
+      run: () => scene.updateCountUp(gameState.twa || 0, {
+        fast: true,
+        duration: scene.getMainCountUpDuration?.(gameState.twa || 0) ?? 140,
+      }),
     },
   ];
 }

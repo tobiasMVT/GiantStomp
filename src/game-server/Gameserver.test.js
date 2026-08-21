@@ -60,6 +60,19 @@ test("removes the union of wins and applies downward gravity", () => {
   assert.ok(gravity.dropEvent.movements.every((movement) => Number.isInteger(movement.to)));
 });
 
+test("winning paid spins emit one spin action without respins", async () => {
+  const server = new GameServer({ random: () => 0.999999 });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "waysWin" });
+
+  assert.equal(states.filter((state) => state.executedAction === "respin").length, 0);
+  const spin = states.find((state) => state.executedAction === "spin");
+  assert.ok(spin?.waysWins?.length);
+  assert.equal(spin.nextAction, "spin");
+  assert.equal(spin.reelsBeforeDrop, null);
+  assert.equal(spin.dropEvent, null);
+});
+
 test("scatter landings no longer charge Anger", async () => {
   const provider = ({ action }) => {
     const board = noWinBoard();
@@ -283,6 +296,40 @@ test("bonus cash seeds low trap power during the first two bonus spins when need
   assert.ok(firstSeedLanding);
   assert.ok(Number(bonusSpins[0].trapMeter.power) > 0);
   assert.equal(bonusSpins.at(-1)?.ouchStompEvent?.triggered, true);
+});
+
+test("bonus gate count zero produces an all-empty board", () => {
+  const server = new GameServer({ random: () => 0 });
+  const board = server.generateBonusBoard();
+  const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+
+  board.forEach((reel) => reel.forEach((symbol) => assert.equal(symbol, emptySymbol)));
+});
+
+test("bonus gate injects the drawn symbol count from bonusSymbolWeights", () => {
+  let call = 0;
+  const gatePick = 20 / 28;
+  const server = new GameServer({
+    random: () => {
+      const values = [gatePick, 0, 0, 0, 0, 0];
+      return values[call++] ?? 0;
+    }
+  });
+  const board = server.generateBonusBoard();
+  const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+  const nonEmpty = board.flat().filter((symbol) => symbol !== emptySymbol);
+
+  assert.equal(nonEmpty.length, 3);
+  nonEmpty.forEach((symbol) => assert.equal(symbol, 111));
+});
+
+test("bonus safe end gate removes zero-inject option on last life with no trap power", () => {
+  const server = new GameServer({ random: () => 0 });
+  const board = server.generateBonusBoard({ forceSymbolLanding: true });
+  const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+  const nonEmpty = board.flat().filter((symbol) => symbol !== emptySymbol);
+
+  assert.ok(nonEmpty.length >= 1);
 });
 
 test("traps award power only on four lights and damage removes the lowest meter segment", () => {

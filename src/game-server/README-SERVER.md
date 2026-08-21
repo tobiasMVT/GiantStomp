@@ -10,23 +10,20 @@ entry point. It returns the complete action timeline for one accepted paid round
 - A symbol wins on its longest consecutive run from reel 1, with 3, 4, or 5 reels.
 - Ways are the product of matching symbol counts on those reels.
 - Win amount is `configured TBM × ways × betSize`.
-- All positions participating in all wins are removed together.
-- Symbols fall toward row 0; replacement symbols enter from above.
-- Cascades use `spin -> respin` in the base game and
-  `freespin -> freerespin` in the bonus.
+- Winning symbols stay on the board; the client highlights them without removal.
+- Each paid spin evaluates ways once and ends (`spin -> spin`, or `spin -> bonustransition` when bonus latches).
+- `respin` / `freerespin` are legacy action names kept for client compatibility but are no longer emitted.
 
 Every action state includes `waysWins`. `clusters` mirrors those wins for transitional
-client compatibility. Winning states expose the post-removal board in
-`reelsBeforeDrop`; cascade states expose the landed board in `reelsAfterDrop` and a
-downward `dropEvent`.
+client compatibility. Winning states no longer populate `reelsBeforeDrop`, `reelsAfterDrop`,
+or `dropEvent`.
 
 ## Scatter and Anger
 
-Only newly landed Scatters count:
+Only newly landed Scatters on the initial spin board count:
 
-- all Scatters on an initial spin are new;
-- on cascades, only Scatter symbols in replacement movements are new;
-- existing Scatters moved by gravity are never counted again.
+- all Scatters visible after the spin drop are candidates;
+- cascades no longer run, so gravity-replacement scatter rules do not apply.
 
 `scatterLandings` are still emitted for presentation, but they no longer charge Anger.
 
@@ -35,13 +32,18 @@ round kill count. After the stomp/crush resolves, the server rolls `bonusTrigger
 using the capped kill count (`0`→`6` in config). The client fakes a 10-step Anger
 meter: each kill can tick it using `angerMeterTickOdds`, but the display caps at step
 9 until bonus actually triggers, when step 10 is shown and the round latches bonus.
-Once bonus is latched, cascades stop immediately.
+Once bonus is latched, the round transitions immediately after the triggering spin.
 
 ## Bonus cash game
 
 Bonus entry emits `bonustransition`, then `freespin` actions containing independently
-spun cash boards. A spin spends one of three lives. Any non-empty bonus symbol
-(`111`–`1000`) restores all three lives; symbol `0` is empty. Bonus values build
+spun cash boards. Each bonus spin starts empty, then rolls `bonusGateForSymbols` to
+decide how many symbols to inject (0–6). That many symbols are drawn from
+`bonusSymbolWeights` and placed on random cells. On the last life with zero trap
+power, the `0` gate is removed for that spin so the bonus cannot end on an all-empty
+board. A spin spends one of three lives.
+Any non-empty bonus symbol (`111`–`1000`) restores all three lives; symbol `0` is
+empty. Bonus values build
 unscaled `trapMeter.power` but do not enter `twa` until the post-bonus ouch stomp resolves.
 The bonus ends after three consecutive empty spins.
 
