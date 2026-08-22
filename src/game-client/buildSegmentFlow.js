@@ -24,6 +24,15 @@ export function buildSegmentFlow({
     || gameState.crushEvent?.reelsBeforeCrush
     || gameState.reels;
   const skipVisual = () => scene.requestFastForward?.();
+  const syncBonusUi = () => scene.syncBonusUiFromState?.({
+    bonusState: gameState.bonusState,
+    trapMeter: gameState.trapMeter,
+    damageWheel: gameState.damageWheel,
+  });
+  const skipBonusVisual = () => {
+    skipVisual();
+    syncBonusUi();
+  };
   const mainWinHoldMs = flowInteractionPolicy.mainWinHoldAfterCountUpMs ?? 0;
   const shouldHoldMainWin = !isBonusCashSpin
     && (gameState.twa || 0) > 0
@@ -59,13 +68,13 @@ export function buildSegmentFlow({
       onSkipAction: () => cancelActiveDelay?.(),
     },
     {
-      checkpoint: false,
+      checkpoint: hasStomp,
       enabled: hasStomp,
       run: () => scene.presentStompFeature?.(gameState.stompEvent, { roundTwa: gameState.twa || 0 }),
       onSkipAction: skipVisual,
     },
     {
-      checkpoint: false,
+      checkpoint: hasCrush,
       enabled: hasCrush,
       run: () => scene.presentCrushFeature?.(gameState.crushEvent),
       onSkipAction: skipVisual,
@@ -85,7 +94,12 @@ export function buildSegmentFlow({
         gameState.bonusState,
         gameState.damageWheel
       ),
-      onSkipAction: skipVisual,
+      onSkipAction: skipBonusVisual,
+    },
+    {
+      checkpoint: true,
+      enabled: isBonusCashSpin,
+      run: () => syncBonusUi(),
     },
     {
       checkpoint: true,

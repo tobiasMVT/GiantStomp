@@ -111,7 +111,7 @@
     "odds": 0.04
   },
   "crushFeature": {
-    "odds": 0.94,
+    "odds": 0.04,
     "crushAmount": {"1": 1, "2": 1, "3": 1, "4": 1 }
   },
   "bonusTriggerOdds": {

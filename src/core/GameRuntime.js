@@ -481,12 +481,20 @@ class GameRuntime {
     const viewportWidth = width ?? this.gameScene.scale.width;
     const viewportHeight = height ?? this.gameScene.scale.height;
     const safeInsets = this.debugSafeInsetsOverride || this.readBrowserSafeInsets();
-    const fallbackGameContent = this.gameScene?.getLayoutContentBounds?.();
+    const freshGameContent = this.gameScene?.getLayoutContentBounds?.();
+    // freeArea (landscape right rail, bottom inset) depends on current aspect ratio —
+    // always read it fresh on resize; only mustSeeBounds may be overridden (layout debug).
+    const gameContent = freshGameContent
+      ? {
+          mustSeeBounds: this.latestGameContent?.mustSeeBounds ?? freshGameContent.mustSeeBounds,
+          freeArea: freshGameContent.freeArea
+        }
+      : this.latestGameContent;
     const snapshot = this.layoutManager.compute({
       viewportWidth,
       viewportHeight,
       safeInsets,
-      gameContent: this.latestGameContent || fallbackGameContent
+      gameContent
     });
     this.latestLayoutSnapshot = snapshot;
     this.eventBus.emit("layout:changed", snapshot);

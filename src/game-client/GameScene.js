@@ -1340,7 +1340,8 @@ export class GameScene extends Phaser.Scene {
         count: this.getNextAngerDisplayCount(),
         max: ANGER_SEGMENT_COUNT,
       });
-      await this.waitForPresentation(70, { skippable: true });
+      const fast = this.fastForwardRequested;
+      await this.waitForPresentation(fast ? 40 : 70, { skippable: !fast });
     }
   }
 
@@ -1348,8 +1349,9 @@ export class GameScene extends Phaser.Scene {
     const start = Number(this.angerMeterState?.count) || 0;
     if (start >= ANGER_SEGMENT_COUNT) return;
 
+    const fast = this.fastForwardRequested;
     const stepCount = ANGER_SEGMENT_COUNT - start;
-    await this.waitForPresentation(180, { skippable: true });
+    await this.waitForPresentation(fast ? 80 : 180, { skippable: !fast });
 
     for (let step = 0; step < stepCount; step += 1) {
       const count = start + step + 1;
@@ -1370,14 +1372,17 @@ export class GameScene extends Phaser.Scene {
       });
 
       if (isFinal) {
-        await this.waitForPresentation(420, { skippable: true });
+        await this.waitForPresentation(fast ? 140 : 420, { skippable: !fast });
         continue;
       }
 
       const progress = step / Math.max(1, stepCount - 2);
       const eased = progress * progress * progress;
       const waitMs = Phaser.Math.Linear(280, 32, eased);
-      await this.waitForPresentation(waitMs, { skippable: true });
+      await this.waitForPresentation(
+        fast ? Math.max(48, waitMs * 0.22) : waitMs,
+        { skippable: !fast }
+      );
     }
   }
 
@@ -1475,8 +1480,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentStompTease(teaseMs = 500) {
-    this.cameras.main.shake(180, 0.006);
-    await this.waitForPresentation(teaseMs, { skippable: true });
+    const fast = this.fastForwardRequested;
+    this.cameras.main.shake(fast ? 90 : 180, 0.006);
+    const duration = fast ? Math.min(160, teaseMs) : teaseMs;
+    await this.waitForPresentation(duration, { skippable: !fast });
   }
 
   attachMotionTrail(target, {
@@ -2584,7 +2591,8 @@ export class GameScene extends Phaser.Scene {
     if (!bounds) return;
 
     await this.presentStompTease(teaseMs);
-    await this.waitForPresentation(pauseMs, { skippable: true });
+    const fast = this.fastForwardRequested;
+    await this.waitForPresentation(pauseMs, { skippable: !fast });
 
     const footWidth = bounds.width + CELL_SIZE * 0.55;
     const footScale = footWidth / 420;
@@ -2709,7 +2717,52 @@ export class GameScene extends Phaser.Scene {
 
   syncCrushHandPair(openHand, snappedHand) {
     if (!openHand?.active || !snappedHand?.active) return;
-    snappedHand.setPosition(openHand.x, openHand.y).setScale(openHand.scaleX, openHand.scaleY);
+    snappedHand
+      .setPosition(openHand.x, openHand.y)
+      .setScale(openHand.scaleX, openHand.scaleY)
+      .setAngle(openHand.angle);
+  }
+
+  createCrushHandPair(startX, startY, handScale) {
+    const openHand = this.createCrushHand("open_hand", startX, startY, handScale)
+      .setDepth(DEPTH.crushHand)
+      .setAlpha(0.98);
+    const snappedHand = this.createCrushHand("snapped_hand", startX, startY, handScale)
+      .setDepth(DEPTH.crushHand)
+      .setAlpha(0)
+      .setVisible(false);
+    return { openHand, snappedHand };
+  }
+
+  getCrushHandTravelAngles(fromX, fromY, toX, toY) {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const dirAngle = Phaser.Math.RadToDeg(Math.atan2(dy, Math.max(Math.abs(dx), 8)));
+    const startAngle = Phaser.Math.Clamp(dirAngle * 0.38 - 5, -18, 14);
+    return { startAngle, endAngle: 0 };
+  }
+
+  async moveCrushHandPair(openHand, snappedHand, toX, toY, handScale, {
+    fromX,
+    fromY,
+    duration = 360,
+  } = {}) {
+    const startX = fromX ?? openHand.x;
+    const startY = fromY ?? openHand.y;
+    const { startAngle, endAngle } = this.getCrushHandTravelAngles(startX, startY, toX, toY);
+    openHand.setPosition(startX, startY).setAngle(startAngle);
+    this.syncCrushHandPair(openHand, snappedHand);
+
+    await this.tweenPromise({
+      targets: openHand,
+      x: toX,
+      y: toY,
+      angle: endAngle,
+      duration,
+      ease: "Cubic.easeInOut",
+      onUpdate: () => this.syncCrushHandPair(openHand, snappedHand),
+    });
+    this.syncCrushHandPair(openHand, snappedHand);
   }
 
   createCrushHand(textureKey, x, y, scale) {
@@ -2736,7 +2789,7 @@ export class GameScene extends Phaser.Scene {
     await this.tweenPromise({ targets: bg, alpha: 1, duration, ease: "Quad.easeInOut" });
   }
 
-  async hideCrushGiantBackground(duration = 360) {
+  async hideCrushGiantBackground(duration = 400) {
     const bg = this.crushBackground;
     if (!bg) return;
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
@@ -2745,10 +2798,8 @@ export class GameScene extends Phaser.Scene {
     await this.tweenPromise({
       targets: bg,
       alpha: 0,
-      x: centerX,
-      y: centerY,
       duration,
-      ease: "Quad.easeInOut",
+      ease: "Quad.easeOut",
       onComplete: () => {
         this.layoutBackgroundImage(bg);
         bg.setPosition(centerX, centerY);
@@ -2788,12 +2839,32 @@ export class GameScene extends Phaser.Scene {
 
   async crossfadeCrushHand(openHand, snappedHand, duration = 120) {
     if (!openHand?.active || !snappedHand?.active) return;
-    snappedHand.setAlpha(0);
+    snappedHand
+      .setPosition(openHand.x, openHand.y)
+      .setScale(openHand.scaleX, openHand.scaleY)
+      .setAngle(openHand.angle)
+      .setAlpha(0)
+      .setVisible(true);
     await Promise.all([
       this.tweenPromise({ targets: openHand, alpha: 0, duration, ease: "Quad.easeIn" }),
       this.tweenPromise({ targets: snappedHand, alpha: 0.98, duration, ease: "Quad.easeOut" }),
     ]);
-    openHand.destroy();
+    openHand.setVisible(false).setAlpha(0);
+  }
+
+  async crossfadeCrushHandToOpen(openHand, snappedHand, handScale, duration = 120) {
+    if (!openHand?.active || !snappedHand?.active) return;
+    openHand
+      .setPosition(snappedHand.x, snappedHand.y)
+      .setScale(handScale, handScale)
+      .setAngle(snappedHand.angle)
+      .setAlpha(0)
+      .setVisible(true);
+    await Promise.all([
+      this.tweenPromise({ targets: snappedHand, alpha: 0, duration, ease: "Quad.easeIn" }),
+      this.tweenPromise({ targets: openHand, alpha: 0.98, duration, ease: "Quad.easeOut" }),
+    ]);
+    snappedHand.setVisible(false).setAlpha(0);
   }
 
   async crushGrabbedSymbol(sprite, handX, handY, cell = {}, killEvent = null) {
@@ -2832,26 +2903,42 @@ export class GameScene extends Phaser.Scene {
   }
 
   getCrushHandExitX(enterX) {
-    return enterX - CELL_SIZE * 0.8;
+    return enterX - CELL_SIZE * 0.5;
   }
 
-  async slideCrushHandOut(hand, exitX, duration = 460) {
+  async slideCrushHandOut(hand, exitX, duration = 480, {
+    exitAngle = -12,
+    fadeDuration = 160,
+  } = {}) {
     if (!hand?.active) return;
     await this.tweenPromise({
       targets: hand,
       x: exitX,
+      angle: exitAngle,
       duration,
       ease: "Cubic.easeIn",
+    });
+    await this.tweenPromise({
+      targets: hand,
+      alpha: 0,
+      duration: fadeDuration,
+      ease: "Quad.easeIn",
       onComplete: () => hand.destroy(),
     });
   }
 
-  async exitCrushHandAfterGrab(enterX, targetY, handScale) {
+  async exitCrushHands(snappedHand, openHand, handScale, enterX) {
+    if (!snappedHand?.active && !openHand?.active) return;
+
+    if (snappedHand?.active && openHand?.active) {
+      await this.crossfadeCrushHandToOpen(openHand, snappedHand, handScale, 100);
+    }
+
+    if (snappedHand?.active) snappedHand.destroy();
+
+    if (!openHand?.active) return;
     const exitX = this.getCrushHandExitX(enterX);
-    const openHand = this.createCrushHand("open_hand", enterX, targetY, handScale)
-      .setDepth(DEPTH.crushHand)
-      .setAlpha(0.98);
-    await this.slideCrushHandOut(openHand, exitX);
+    await this.slideCrushHandOut(openHand, exitX, 480, { exitAngle: openHand.angle - 10 });
   }
 
   getCrushCells(crushEvent = {}) {
@@ -2864,30 +2951,14 @@ export class GameScene extends Phaser.Scene {
     return [{ reel, row, symbol: crushEvent.symbol, isAnimal: true }];
   }
 
-  async presentSingleCrushGrab(cell, { enterX, handScale, isFirstGrab = false, killEvent = null }) {
+  async performCrushGrabSequence(openHand, snappedHand, cell, target, handScale, {
+    isFirstGrab = false,
+    killEvent = null,
+  } = {}) {
     const reel = Number(cell.reel);
     const row = Number(cell.row);
-    const target = getCellCenter(reel, row);
-    const grabX = target.x + CRUSH_HAND_TARGET_OFFSET_X;
     const sprite = this.reelSprites[reel]?.[row];
     if (!sprite) return;
-
-    const openHand = this.createCrushHand("open_hand", enterX, target.y, handScale)
-      .setDepth(DEPTH.crushHand)
-      .setAlpha(0.98);
-    const snappedHand = this.createCrushHand("snapped_hand", enterX, target.y, handScale)
-      .setDepth(DEPTH.crushHand)
-      .setAlpha(0)
-      .setVisible(false);
-
-    await this.tweenPromise({
-      targets: openHand,
-      x: grabX,
-      y: target.y,
-      duration: isFirstGrab ? 420 : 360,
-      ease: "Cubic.easeOut",
-    });
-    snappedHand.setPosition(openHand.x, openHand.y).setVisible(true);
 
     openHand.setDepth(DEPTH.crushGrab);
     snappedHand.setDepth(DEPTH.crushGrab);
@@ -2914,14 +2985,9 @@ export class GameScene extends Phaser.Scene {
         count: this.getNextAngerDisplayCount(),
         max: ANGER_SEGMENT_COUNT,
       });
-      await this.waitForPresentation(70, { skippable: true });
+      const fast = this.fastForwardRequested;
+      await this.waitForPresentation(fast ? 40 : 70, { skippable: !fast });
     }
-
-    await this.waitForPresentation(280, { skippable: true });
-
-    const exitX = this.getCrushHandExitX(enterX);
-    await this.slideCrushHandOut(snappedHand, exitX);
-    await this.exitCrushHandAfterGrab(enterX, target.y, handScale);
   }
 
   async presentCrushFeature(crushEvent = {}) {
@@ -2933,30 +2999,57 @@ export class GameScene extends Phaser.Scene {
     const enterX = GRID_OFFSET_X - CELL_SIZE * 1.6;
 
     await this.showCrushGiantBackground(520);
-    await this.waitForPresentation(Number(crushEvent.teaseMs) || 700, { skippable: true });
-    await this.waitForPresentation(Number(crushEvent.pauseMs) || 350, { skippable: true });
+    const fast = this.fastForwardRequested;
+    await this.waitForPresentation(Number(crushEvent.teaseMs) || 700, { skippable: !fast });
+    await this.waitForPresentation(Number(crushEvent.pauseMs) || 350, { skippable: !fast });
+
+    let openHand = null;
+    let snappedHand = null;
 
     for (let index = 0; index < crushedCells.length; index += 1) {
       const cell = crushedCells[index];
+      const isFirstGrab = index === 0;
+      const isLastGrab = index === crushedCells.length - 1;
       const killEvent = cell.isAnimal !== false
         ? this.getAnimalKillEvent(crushEvent.animalKillEvents, cell)
         : null;
-      await this.presentSingleCrushGrab(cell, {
-        enterX,
-        handScale,
-        isFirstGrab: index === 0,
+      const reel = Number(cell.reel);
+      const row = Number(cell.row);
+      const target = getCellCenter(reel, row);
+      const grabX = target.x + CRUSH_HAND_TARGET_OFFSET_X;
+      const grabY = target.y;
+
+      if (isFirstGrab) {
+        ({ openHand, snappedHand } = this.createCrushHandPair(enterX, grabY, handScale));
+        await this.moveCrushHandPair(openHand, snappedHand, grabX, grabY, handScale, {
+          fromX: enterX,
+          fromY: grabY,
+          duration: 420,
+        });
+      } else {
+        await this.crossfadeCrushHandToOpen(openHand, snappedHand, handScale, 130);
+        await this.moveCrushHandPair(openHand, snappedHand, grabX, grabY, handScale, {
+          duration: 380,
+        });
+      }
+
+      await this.performCrushGrabSequence(openHand, snappedHand, cell, target, handScale, {
+        isFirstGrab,
         killEvent,
       });
-      if (index < crushedCells.length - 1) {
-        await this.waitForPresentation(180, { skippable: true });
+
+      await this.waitForPresentation(280, { skippable: true });
+
+      if (isLastGrab) {
+        await this.exitCrushHands(snappedHand, openHand, handScale, enterX);
       }
     }
+
+    await this.hideCrushGiantBackground(420);
 
     if (crushEvent.bonusTriggered) {
       await this.presentAnimalKillAngerOvercharge();
     }
-
-    await this.hideCrushGiantBackground(360);
   }
 
   setBonusUiVisible(visible) {
@@ -3155,6 +3248,10 @@ export class GameScene extends Phaser.Scene {
       removedSegments: [...(damageWheel?.removedSegments || [])],
       remainingSegments: [...remaining],
     };
+  }
+
+  syncBonusUiFromState({ bonusState = {}, trapMeter = {}, damageWheel = {} } = {}) {
+    this.updateBonusState(bonusState, trapMeter, damageWheel);
   }
 
   updateBonusState(bonusState = {}, trapMeter = {}, damageWheel = {}) {
@@ -3446,8 +3543,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentBonusCashLandings(landings = [], trapMeter = {}, bonusState = {}, damageWheel = {}) {
+    if (this.fastForwardRequested) {
+      this.syncBonusUiFromState({ bonusState, trapMeter, damageWheel });
+      return;
+    }
+
     let livesRestored = false;
     for (const landing of landings) {
+      if (this.fastForwardRequested) break;
+
       const sprite = this.reelSprites?.[landing.reel]?.[landing.row];
       if (!sprite || sprite.destroyed) continue;
       await this.tweenPromise({

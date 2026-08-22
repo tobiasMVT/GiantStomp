@@ -33,6 +33,10 @@ Skippable path: `Client → buildSegmentFlow → SegmentFlowRunner → GameScene
 
 Skip/fast-forward affects **presentation timing only**. Gameplay state and server math are never accelerated.
 
+Bonus freespins add a checkpoint segment (`syncBonusUiFromState`) so quick-stop during reel spin or landing animations still snaps trap power and the damage meter to the server `gameState`, even when `presentBonusCashLandings` is bypassed.
+
+Stomp and crush segments are checkpoints in `buildSegmentFlow.js`, so quick-stop during the drop or settle wait lands on the feature segment and still runs it (fast-forwarded) instead of jumping straight to `emitOutcomeRevealed` and the following `bonustransition`.
+
 ## Adding Features Checklist
 
 **Client.js:** sequencing, state transitions, flow decisions, triggers, checkpoints.
