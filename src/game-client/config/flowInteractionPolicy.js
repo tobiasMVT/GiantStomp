@@ -15,6 +15,9 @@ const flowInteractionPolicy = {
   // Hold after main-game win countup finishes before round can end (ms).
   mainWinHoldAfterCountUpMs: 500,
 
+  // Pause on bonus dead spins so the empty board reads before the next freespin (ms).
+  bonusDeadSpinHoldMs: 550,
+
   // Action names that should STOP auto-continuation inside one spin round.
   // Pause once before the first freespin so the transition can settle.
   // If nextAction is not listed here, controller continues automatically.

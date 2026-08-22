@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import clientConfig from "./config/client_config.json";
 import gameClientConfig from "./config/gameClientConfig";
 import soundInteractionPolicy from "./config/soundInteractionPolicy";
+import flowInteractionPolicy from "./config/flowInteractionPolicy";
 import {
   CELL_SIZE,
   GRID_HEIGHT_PX,
@@ -21,6 +22,8 @@ import {
 const REELS = 5;
 const ROWS = 3;
 const SYMBOL_SCALE = 0.65;
+const HIGHLIGHT_SYMBOL_SCALE = SYMBOL_SCALE * 1.02;
+const HIGHLIGHT_SYMBOL_POP_SCALE = SYMBOL_SCALE * 1.05;
 const ANIMAL_SYMBOLS = new Set([1, 2, 3, 4, 5]);
 const LOW_SYMBOLS = [6, 7, 8, 9, 10];
 const OUCH_FAKE_SPIN_LOW_REEL = 0;
@@ -168,6 +171,7 @@ export class GameScene extends Phaser.Scene {
     this.presentationWaits = new Set();
     this.activeTweens = new Set();
     this.highlightedSprites = new Set();
+    this.highlightGlows = new Set();
     this.fastForwardRequested = false;
     this.currentWin = 0;
     this.countUpLabel = "WIN";
@@ -797,7 +801,12 @@ export class GameScene extends Phaser.Scene {
         .setScale(SYMBOL_SCALE)
         .setDepth(DEPTH.symbols);
       if (this.reelMask) sprite.setMask(this.reelMask);
-      Object.assign(sprite, { symbolId: Number(symbol), reel, row });
+      Object.assign(sprite, {
+        symbolId: Number(symbol),
+        reel,
+        row,
+        baseTextureKey: texture,
+      });
       return sprite;
     }
 
@@ -822,7 +831,12 @@ export class GameScene extends Phaser.Scene {
       image.clearTint();
       return sprite;
     };
-    Object.assign(sprite, { symbolId: Number(symbol), reel, row });
+    Object.assign(sprite, {
+      symbolId: Number(symbol),
+      reel,
+      row,
+      baseTextureKey: texture,
+    });
     return sprite;
   }
 
@@ -1071,26 +1085,143 @@ export class GameScene extends Phaser.Scene {
     return extractPositions(gameState.waysWins?.length ? gameState.waysWins : gameState.clusters);
   }
 
+  createWinHighlightAura(sprite) {
+    const texture = sprite.baseTextureKey
+      || (this.textures.exists(String(sprite.symbolId)) ? String(sprite.symbolId) : null);
+    if (!texture) return {};
+
+    const makeGlow = ({ tint, alpha, scale }) => {
+      const glow = this.add.image(sprite.x, sprite.y, texture)
+        .setDepth(DEPTH.symbols - 1)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setAlpha(0)
+        .setTint(tint)
+        .setScale(scale);
+      if (this.reelMask) glow.setMask(this.reelMask);
+      this.highlightGlows.add(glow);
+      glow.highlightBaseAlpha = alpha;
+      glow.highlightBaseScale = scale;
+      return glow;
+    };
+
+    const warmGlow = makeGlow({
+      tint: 0xffe08a,
+      alpha: 0.5,
+      scale: SYMBOL_SCALE * 1.2,
+    });
+    const brightGlow = makeGlow({
+      tint: 0xffffff,
+      alpha: 0.88,
+      scale: SYMBOL_SCALE * 1.12,
+    });
+    const crispGlow = makeGlow({
+      tint: 0xffffff,
+      alpha: 0.58,
+      scale: SYMBOL_SCALE * 1.05,
+    });
+
+    return {
+      warmGlow,
+      brightGlow,
+      crispGlow,
+    };
+  }
+
   async highlightWins(gameState) {
     const sprites = this.getWinPositions(gameState)
       .map(({ reel, row }) => this.reelSprites[reel]?.[row])
       .filter(Boolean);
     if (!sprites.length) return;
     this.playSfx("wins_highlight", { volume: 0.65 });
-    sprites.forEach((sprite) => {
-      sprite.setTint(0xffef9c);
+
+    const entries = sprites.map((sprite) => {
+      sprite.setTint(0xffffff);
       this.highlightedSprites.add(sprite);
+      const glow = this.createWinHighlightAura(sprite);
+      return { sprite, ...glow };
     });
-    await Promise.all(sprites.map((sprite, index) => this.tweenPromise({
-      targets: sprite,
-      scaleX: SYMBOL_SCALE * 1.12,
-      scaleY: SYMBOL_SCALE * 1.12,
-      duration: 180,
-      delay: index * 18,
-      yoyo: true,
-      repeat: 1,
-      ease: "Sine.easeInOut",
-    })));
+
+    await Promise.all(entries.map(({ sprite, warmGlow, brightGlow, crispGlow }, index) => {
+      const delay = index * 5;
+      const pop = () => Promise.all([
+        this.tweenPromise({
+          targets: sprite,
+          scaleX: HIGHLIGHT_SYMBOL_POP_SCALE,
+          scaleY: HIGHLIGHT_SYMBOL_POP_SCALE,
+          duration: 78,
+          delay,
+          ease: "Quad.easeOut",
+        }),
+        ...(warmGlow ? [this.tweenPromise({
+          targets: warmGlow,
+          alpha: 0.62,
+          scaleX: SYMBOL_SCALE * 1.25,
+          scaleY: SYMBOL_SCALE * 1.25,
+          duration: 76,
+          delay,
+          ease: "Quad.easeOut",
+        })] : []),
+        ...(brightGlow ? [this.tweenPromise({
+          targets: brightGlow,
+          alpha: 0.98,
+          scaleX: SYMBOL_SCALE * 1.16,
+          scaleY: SYMBOL_SCALE * 1.16,
+          duration: 74,
+          delay,
+          ease: "Quad.easeOut",
+        })] : []),
+        ...(crispGlow ? [this.tweenPromise({
+          targets: crispGlow,
+          alpha: 0.84,
+          scaleX: SYMBOL_SCALE * 1.08,
+          scaleY: SYMBOL_SCALE * 1.08,
+          duration: 68,
+          delay,
+          ease: "Quad.easeOut",
+        })] : []),
+      ]);
+      const settleTweens = [
+        this.tweenPromise({
+          targets: sprite,
+          scaleX: HIGHLIGHT_SYMBOL_SCALE,
+          scaleY: HIGHLIGHT_SYMBOL_SCALE,
+          duration: 95,
+          ease: "Quad.easeOut",
+        }),
+      ];
+      if (warmGlow) {
+        settleTweens.push(this.tweenPromise({
+          targets: warmGlow,
+          alpha: warmGlow.highlightBaseAlpha,
+          scaleX: warmGlow.highlightBaseScale,
+          scaleY: warmGlow.highlightBaseScale,
+          duration: 118,
+          ease: "Quad.easeOut",
+        }));
+      }
+      if (brightGlow) {
+        settleTweens.push(this.tweenPromise({
+          targets: brightGlow,
+          alpha: brightGlow.highlightBaseAlpha,
+          scaleX: brightGlow.highlightBaseScale,
+          scaleY: brightGlow.highlightBaseScale,
+          duration: 110,
+          ease: "Quad.easeOut",
+        }));
+      }
+      if (crispGlow) {
+        settleTweens.push(this.tweenPromise({
+          targets: crispGlow,
+          alpha: crispGlow.highlightBaseAlpha,
+          scaleX: crispGlow.highlightBaseScale,
+          scaleY: crispGlow.highlightBaseScale,
+          duration: 96,
+          ease: "Quad.easeOut",
+        }));
+      }
+      const settle = () => Promise.all(settleTweens);
+      return pop().then(settle);
+    }));
   }
 
   clearHighlights() {
@@ -1098,6 +1229,10 @@ export class GameScene extends Phaser.Scene {
       if (!sprite.destroyed) sprite.clearTint().setScale(SYMBOL_SCALE);
     });
     this.highlightedSprites.clear();
+    this.highlightGlows.forEach((glow) => {
+      if (!glow.destroyed) glow.destroy();
+    });
+    this.highlightGlows.clear();
   }
 
   skipHighlightPhase() {
@@ -3252,6 +3387,16 @@ export class GameScene extends Phaser.Scene {
 
   syncBonusUiFromState({ bonusState = {}, trapMeter = {}, damageWheel = {} } = {}) {
     this.updateBonusState(bonusState, trapMeter, damageWheel);
+  }
+
+  async presentBonusDeadSpinHold(bonusState = {}, trapMeter = {}, damageWheel = {}) {
+    this.syncBonusUiFromState({ bonusState, trapMeter, damageWheel });
+    const holdMs = flowInteractionPolicy.bonusDeadSpinHoldMs ?? 550;
+    const fast = this.fastForwardRequested;
+    await this.waitForPresentation(
+      fast ? Math.min(180, holdMs) : holdMs,
+      { skippable: !fast }
+    );
   }
 
   updateBonusState(bonusState = {}, trapMeter = {}, damageWheel = {}) {

@@ -35,6 +35,8 @@ Skip/fast-forward affects **presentation timing only**. Gameplay state and serve
 
 Bonus freespins add a checkpoint segment (`syncBonusUiFromState`) so quick-stop during reel spin or landing animations still snaps trap power and the damage meter to the server `gameState`, even when `presentBonusCashLandings` is bypassed.
 
+Dead bonus spins (`bonusLandings` empty) use a checkpoint `presentBonusDeadSpinHold` so quick-stop during the reel spin still lands on a brief empty-board pause before the next freespin auto-continues.
+
 Stomp and crush segments are checkpoints in `buildSegmentFlow.js`, so quick-stop during the drop or settle wait lands on the feature segment and still runs it (fast-forwarded) instead of jumping straight to `emitOutcomeRevealed` and the following `bonustransition`.
 
 ## Adding Features Checklist

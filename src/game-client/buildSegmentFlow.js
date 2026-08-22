@@ -20,6 +20,7 @@ export function buildSegmentFlow({
   const hasBonusLandings = isBonusCashSpin
     && Array.isArray(gameState.bonusLandings)
     && gameState.bonusLandings.length > 0;
+  const isBonusDeadSpin = isBonusCashSpin && !hasBonusLandings;
   const dropReels = gameState.stompEvent?.reelsBeforeStomp
     || gameState.crushEvent?.reelsBeforeCrush
     || gameState.reels;
@@ -87,9 +88,9 @@ export function buildSegmentFlow({
     },
     {
       checkpoint: false,
-      enabled: isBonusCashSpin,
+      enabled: isBonusCashSpin && hasBonusLandings,
       run: () => scene.presentBonusCashLandings?.(
-        hasBonusLandings ? gameState.bonusLandings : [],
+        gameState.bonusLandings,
         gameState.trapMeter,
         gameState.bonusState,
         gameState.damageWheel
@@ -97,8 +98,18 @@ export function buildSegmentFlow({
       onSkipAction: skipBonusVisual,
     },
     {
-      checkpoint: true,
-      enabled: isBonusCashSpin,
+      checkpoint: isBonusDeadSpin,
+      enabled: isBonusDeadSpin,
+      run: () => scene.presentBonusDeadSpinHold?.(
+        gameState.bonusState,
+        gameState.trapMeter,
+        gameState.damageWheel
+      ),
+      onSkipAction: skipVisual,
+    },
+    {
+      checkpoint: isBonusCashSpin && hasBonusLandings,
+      enabled: isBonusCashSpin && hasBonusLandings,
       run: () => syncBonusUi(),
     },
     {
