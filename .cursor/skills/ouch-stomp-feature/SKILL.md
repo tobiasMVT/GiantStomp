@@ -9,7 +9,9 @@ description: Post-bonus trap resolution — server depth math, ouchStompEvent co
 
 Config in `server_config.json`:
 
-- `damageMultilpierStepOdds` — per-step continuation chance after the guaranteed first step (default `0.66`).
+- `damageMultilpierStepOdds` — base per-draw continuation chance after the guaranteed first step (default `0.75`).
+- `adjust0ForBonusGate_TrapPowerValueAffects0odds` — power-range brackets that shift the bonus empty-gate weight. Each key is the range start (`0` → 0–4.99, `5` → 5–9.99, etc.).
+- `adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds` — same range semantics for ouch-stomp continuation draws. Each entry's `damageMultilpierStepOdds` is a percentage-point delta applied for the first `stepsActive` continuation **draws** only, then odds revert to base.
 - `ouchStompFeature.stepIntervalMs` — client pacing hint for extra steps (default `3000`).
 - `ouchStompFeature.maxCoinsPerStep` — coin cap per step (default `20`).
 
@@ -17,7 +19,7 @@ After `appendBonusCashGame` finishes, `resolveOuchStomp(trapPower, damageWheel, 
 
 1. Skip when `trapPower <= 0` or no `remainingSegments`.
 2. **Step 1 is always free** — consume leftmost segment.
-3. Each extra segment rolls `random() < damageMultilpierStepOdds` until fail or segments exhausted.
+3. Each extra segment rolls against continuation odds until fail or segments exhausted. The first `stepsActive` draws may use boosted/reduced odds from trap power; later draws use base `damageMultilpierStepOdds`.
 4. Per step: `winTbm = trapPower × multiplier`, `winAmount = winTbm × betSize`.
 5. Final credited win = **last step's** `winAmount` (not cumulative across steps).
 6. Attach `ouchStompEvent` to the last bonus `freespin` state; add final win to `totals.twa`.

@@ -47,6 +47,16 @@ export class Client {
     }
 
     if (gameState.nextAction === "spin") {
+      const winCap = this.scene.getWinCap?.() ?? 0;
+      const cappedWin = this.scene.clampToWinCap?.(gameState.twa ?? 0) ?? 0;
+      if (
+        winCap > 0
+        && gameState.winCapReached
+        && !this.scene.isPostBonusOuch
+        && !this.scene.totalWinTitleText?.visible
+      ) {
+        await this.scene.presentWinCapSequence?.(cappedWin);
+      }
       this.scene.emitRoundEnded?.();
     }
   }

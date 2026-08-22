@@ -2,6 +2,7 @@
   "playBackEnd": true,
   "devMode": false,
   "mathStyle": "normal",
+  "wincap": 10000,
   "wallet": {
     "balance": 10000,
     "cost": 1,
@@ -52,21 +53,29 @@
     "333": 20,
     "444": 20,
     "555": 20,
-    "666": 20,
+    "666": 25,
     "777": 20,
-    "888": 20,
-    "999": 20,
-    "1000": 15,
+    "888": 16,
+    "999": 15,
+    "1000": 10,
     "0": 0
   },
   "bonusGateForSymbols": {
-    "0": 15,
-    "1": 1,
-    "2": 3,
-    "3": 3,
-    "4": 3,
-    "5": 2,
+    "0": 42,
+    "1": 10,
+    "2": 10,
+    "3": 10,
+    "4": 8,
+    "5": 3,
     "6": 1
+  },
+  "adjust0ForBonusGate_TrapPowerValueAffects0odds": {
+    "0": -10,
+    "5": -5,
+    "10": 0,
+    "20": 5,
+    "50": 10,
+    "100": 15
   },
   "bonusWinAmounts": {
     "111": 0.1,
@@ -82,16 +91,16 @@
   },
   "damageWheelSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
   "paytable": {
-    "1": { "3": 0.6, "4": 1.2, "5": 2.5 },
-    "2": { "3": 0.4, "4": 0.8, "5": 1.5 },
-    "3": { "3": 0.4, "4": 0.8, "5": 1.5 },
-    "4": { "3": 0.4, "4": 0.8, "5": 1.5},
-    "5": { "3": 0.4, "4": 0.8, "5": 1.5 },
-    "6": { "3": 0.1, "4": 0.2, "5": 1 },
-    "7": { "3": 0.1, "4": 0.2, "5": 0.8 },
-    "8": { "3": 0.1, "4": 0.2, "5": 0.6 },
-    "9": { "3": 0.1, "4": 0.2, "5": 0.4 },
-    "10": { "3": 0.1, "4": 0.2, "5": 0.3 }
+    "1": { "3": 0.5, "4": 1, "5": 2 },
+    "2": { "3": 0.5, "4": 1, "5": 2 },
+    "3": { "3": 0.5, "4": 1, "5": 2 },
+    "4": { "3": 0.5, "4": 1, "5": 2},
+    "5": { "3": 0.5, "4": 1, "5": 2 },
+    "6": { "3": 0.1, "4": 0.5, "5": 1 },
+    "7": { "3": 0.1, "4": 0.5, "5": 1 },
+    "8": { "3": 0.1, "4": 0.5, "5": 1 },
+    "9": { "3": 0.1, "4": 0.5, "5": 1 },
+    "10": { "3": 0.1, "4": 0.5, "5": 1 }
   },
   "anger": {
     "maximum": 10,
@@ -99,32 +108,31 @@
   },
   "stompFeature": {
     "stompReelSize": { "2": 1, "3": 1 },
-    "odds": 0.07
+    "odds": 0.04
   },
   "crushFeature": {
-    "odds": 0.07,
-    "crushAmount": {"1": 1, "2": 1, "3": 1 }
-  },
-  "bonusTriggerOddsFake": {
-    "0": 0,
-    "1": 99,
-    "2": 99,
-    "3": 99,
-    "4": 99,
-    "5": 99,
-    "6": 100
+    "odds": 0.94,
+    "crushAmount": {"1": 1, "2": 1, "3": 1, "4": 1 }
   },
   "bonusTriggerOdds": {
     "0": 0,
     "1": 5,
-    "2": 10,
-    "3": 15,
+    "2": 11,
+    "3": 17,
     "4": 25,
     "5": 50,
     "6": 100
   },
-  "angerMeterTickOdds": 0.75,
+  "angerMeterTickOdds": 0.80,
   "damageMultilpierStepOdds": 0.75,
+  "adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds": {
+    "0": { "damageMultilpierStepOdds": 15, "stepsActive": 5 },
+    "5": { "damageMultilpierStepOdds": 10, "stepsActive": 3 },
+    "10": { "damageMultilpierStepOdds": 5, "stepsActive": 3 },
+    "20": { "damageMultilpierStepOdds": 0, "stepsActive": 10 },
+    "50": { "damageMultilpierStepOdds": -5, "stepsActive": 10 },
+    "100": { "damageMultilpierStepOdds": -10, "stepsActive": 10 }
+  },
   "ouchStompFeature": {
     "stepIntervalMs": 1800,
     "maxCoinsPerStep": 20

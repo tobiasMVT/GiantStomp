@@ -1,3 +1,5 @@
+import flowInteractionPolicy from "./config/flowInteractionPolicy.js";
+
 const FULL_DROP_ACTIONS = new Set(["spin", "freespin"]);
 const CASCADE_ACTIONS = new Set(["respin", "freerespin"]);
 
@@ -22,6 +24,10 @@ export function buildSegmentFlow({
     || gameState.crushEvent?.reelsBeforeCrush
     || gameState.reels;
   const skipVisual = () => scene.requestFastForward?.();
+  const mainWinHoldMs = flowInteractionPolicy.mainWinHoldAfterCountUpMs ?? 0;
+  const shouldHoldMainWin = !isBonusCashSpin
+    && (gameState.twa || 0) > 0
+    && mainWinHoldMs > 0;
 
   return [
     {
@@ -55,7 +61,7 @@ export function buildSegmentFlow({
     {
       checkpoint: false,
       enabled: hasStomp,
-      run: () => scene.presentStompFeature?.(gameState.stompEvent),
+      run: () => scene.presentStompFeature?.(gameState.stompEvent, { roundTwa: gameState.twa || 0 }),
       onSkipAction: skipVisual,
     },
     {
@@ -99,6 +105,12 @@ export function buildSegmentFlow({
         fast: true,
         duration: scene.getMainCountUpDuration?.(gameState.twa || 0) ?? 140,
       }),
+    },
+    {
+      checkpoint: false,
+      enabled: shouldHoldMainWin,
+      run: () => waitCancellable?.(mainWinHoldMs),
+      onSkipAction: () => cancelActiveDelay?.(),
     },
   ];
 }

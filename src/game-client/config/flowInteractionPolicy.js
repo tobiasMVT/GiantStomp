@@ -12,6 +12,9 @@ const flowInteractionPolicy = {
   // Use 0 if checkpoint clearing is enough for your current UX.
   fastForwardCooldownMs: 0,
 
+  // Hold after main-game win countup finishes before round can end (ms).
+  mainWinHoldAfterCountUpMs: 500,
+
   // Action names that should STOP auto-continuation inside one spin round.
   // Pause once before the first freespin so the transition can settle.
   // If nextAction is not listed here, controller continues automatically.

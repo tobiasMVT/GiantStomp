@@ -1,5 +1,5 @@
 {
-  "rounds": 5000000,
+  "rounds": 500000,
   "betSize": 1,
   "ticketStrategy": "normal",
   "outputPath": "simulation-output/sim-{date}_{time}-{strategy}-{rounds}r.json",

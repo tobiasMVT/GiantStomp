@@ -39,9 +39,13 @@ Once bonus is latched, the round transitions immediately after the triggering sp
 Bonus entry emits `bonustransition`, then `freespin` actions containing independently
 spun cash boards. Each bonus spin starts empty, then rolls `bonusGateForSymbols` to
 decide how many symbols to inject (0–6). That many symbols are drawn from
-`bonusSymbolWeights` and placed on random cells. On the last life with zero trap
-power, the `0` gate is removed for that spin so the bonus cannot end on an all-empty
-board. A spin spends one of three lives.
+`bonusSymbolWeights` and placed on random cells. Before the roll, the weight on count
+`0` is shifted by `adjust0ForBonusGate_TrapPowerValueAffects0odds` based on current
+`trapMeter.power` (negative values remove empty weight and boost symbol landings; positive
+values add empty weight). Brackets are power ranges: each key is the range start, applied
+while `power >= key` until the next higher key (e.g. `"0"` covers 0–4.99, `"5"` covers
+5–9.99). On the last life with zero trap power, the `0` gate is still removed for that
+spin so the bonus cannot end on an all-empty board. A spin spends one of three lives.
 Any non-empty bonus symbol (`111`–`1000`) restores all three lives; symbol `0` is
 empty. Bonus values build
 unscaled `trapMeter.power` but do not enter `twa` until the post-bonus ouch stomp resolves.
@@ -49,7 +53,12 @@ The bonus ends after three consecutive empty spins.
 
 When the bonus ends, `resolveOuchStomp()` runs on the final trap power and damage wheel.
 Step 1 always consumes the leftmost remaining segment; each extra step rolls against
-`damageMultilpierStepOdds` (default `0.66`). Win per step is `trapPower × segment value`;
+`damageMultilpierStepOdds` (default `0.75`). Trap power can temporarily shift those draw
+odds via `adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds`: use the bracket
+whose key is the largest value still `<= trapPower` (same range semantics as the bonus
+gate table). Apply `damageMultilpierStepOdds` as a percentage-point delta for the first
+`stepsActive` continuation **draws** only (not the free first step), then revert to base
+odds. Win per step is `trapPower × segment value`;
 the credited win is the **last** step's `winAmount`, attached as `ouchStompEvent` on the
 final bonus `freespin` state and added to `twa`.
 

@@ -84,6 +84,7 @@ const CRUSH_HAND_GRIP = {
   open_hand: { x: 0.91, y: 0.36 },
   snapped_hand: { x: 0.91, y: 0.36 },
 };
+const CRUSH_HAND_TARGET_OFFSET_X = -20;
 const CRUSH_HAND_SCALE = 2;
 const DEPTH = {
   background: 0,
@@ -100,6 +101,7 @@ const DEPTH = {
 };
 const STOMP_COIN_SCALE_MIN = 0.13;
 const STOMP_COIN_SCALE_MAX = 0.15;
+const WIN_CAP = Math.max(0, Number(clientConfig.wincap) || 0);
 const SYMBOL_LAND_EASE = "Back.easeOut";
 const SYMBOL_LAND_EASE_PARAMS = [1.08];
 
@@ -184,6 +186,7 @@ export class GameScene extends Phaser.Scene {
     this.stompLandedCoins = [];
     this.stompCoinsRegistry = new Set();
     this.stompCoinLaunchPromises = [];
+    this.stompWinCapHandled = false;
     this.totalWinBackground = null;
     this.bonusUi = [];
     this.lifeSegments = [];
@@ -1642,10 +1645,12 @@ export class GameScene extends Phaser.Scene {
 
     const targetX = this.countUpText.x;
     const targetY = this.countUpText.y;
-    const resolvedTarget = targetWin === null ? null : Number(targetWin) || 0;
+    const resolvedTarget = targetWin === null
+      ? null
+      : this.clampToWinCap(Number(targetWin) || 0);
     const coinValues = coins.map((coin) => Number(coin.getData("coinValue")) || 0);
     const coinTotal = coinValues.reduce((sum, value) => sum + value, 0);
-    let collectedValue = this.currentWin;
+    let collectedValue = this.clampToWinCap(this.currentWin);
     if (resolvedTarget !== null && coinTotal > 0) {
       const scale = (resolvedTarget - collectedValue) / coinTotal;
       coinValues.forEach((value, index) => {
@@ -1671,7 +1676,7 @@ export class GameScene extends Phaser.Scene {
         onComplete: () => {
           this.playSfx("wins_payout", { volume: 0.55 });
           if (coinValue > 0) {
-            collectedValue = Number((collectedValue + coinValue).toFixed(2));
+            collectedValue = this.clampToWinCap(Number((collectedValue + coinValue).toFixed(2)));
             this.syncCountUpDisplay(collectedValue);
           }
           coin.destroy();
@@ -1683,7 +1688,7 @@ export class GameScene extends Phaser.Scene {
     if (resolvedTarget !== null) {
       collectedValue = resolvedTarget;
     }
-    this.currentWin = collectedValue;
+    this.currentWin = this.clampToWinCap(collectedValue);
 
     if (collectedValue > 0) {
       await this.tweenPromise({
@@ -2213,7 +2218,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentOuchTotalWinSequence(totalWin = 0) {
-    const grandTotal = Math.max(0, Number(totalWin) || 0);
+    const grandTotal = this.clampToWinCap(totalWin);
     const overlay = this.ouchFadeOverlay;
     const fromBlack = overlay?.visible && overlay.alpha > 0.5;
     const fadeTargets = [
@@ -2270,6 +2275,7 @@ export class GameScene extends Phaser.Scene {
     this.playOuchCelebrationSfx();
     await this.updateCountUp(grandTotal, {
       duration: Phaser.Math.Clamp(900 + grandTotal * 80, 900, 1700),
+      skipStompCoinCollect: true,
     });
     await this.spawnCelebrationCoinBurst(
       layout.centerX,
@@ -2279,11 +2285,58 @@ export class GameScene extends Phaser.Scene {
     await this.waitForPresentation(320, { skippable: true });
   }
 
+  async presentWinCapSequence(totalWin = 0) {
+    const grandTotal = this.clampToWinCap(totalWin);
+    if (grandTotal <= 0 || WIN_CAP <= 0 || grandTotal < WIN_CAP) return;
+
+    const fadeTargets = [
+      this.background,
+      this.reelFrame,
+      ...this.reelSprites.flat().filter(Boolean),
+    ].filter(Boolean);
+
+    this.setAngerUiVisible(false);
+    await Promise.all([
+      this.tweenPromise({ targets: fadeTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.totalWinBackground, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
+    ]);
+
+    this.currentWin = 0;
+    this.countUpLabel = "TOTAL WIN";
+    this.totalWinTitleText?.setVisible(true).setAlpha(1);
+    const layout = this.layoutTotalWinTexts();
+    this.countUpText
+      ?.setAlpha(1)
+      .setVisible(true);
+    this.syncCountUpDisplay(0);
+
+    const popScale = layout.amountScale * 1.08;
+    await this.tweenPromise({
+      targets: this.countUpText,
+      scaleX: popScale,
+      scaleY: popScale,
+      duration: 180,
+      yoyo: true,
+      ease: "Back.easeOut",
+    });
+    this.playOuchCelebrationSfx();
+    await this.updateCountUp(grandTotal, {
+      duration: Phaser.Math.Clamp(900 + grandTotal * 0.08, 900, 1700),
+      skipStompCoinCollect: true,
+    });
+    await this.spawnCelebrationCoinBurst(
+      layout.centerX,
+      layout.amountY - 14,
+      Phaser.Math.Clamp(Math.round(10 + grandTotal * 0.002), 10, 20)
+    );
+    await this.waitForPresentation(320, { skippable: true });
+  }
+
   async presentOuchStompStep(step = {}, ouchEvent = {}, impact = {}) {
     const stepNumber = Number(step.step) || 1;
     const stepIntervalMs = Number(ouchEvent.stepIntervalMs) || 3000;
     const coinCount = Number(ouchEvent.coinCountPerStep) || 1;
-    const winAmount = Number(step.winAmount) || 0;
+    const winAmount = this.clampToWinCap(Number(step.winAmount) || 0);
     const centerX = impact?.bounds?.centerX || (GRID_OFFSET_X + GRID_WIDTH_PX / 2);
     const centerY = (impact?.impactY || GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.55) + CELL_SIZE * 0.1;
 
@@ -2345,7 +2398,17 @@ export class GameScene extends Phaser.Scene {
 
     await this.waitForPresentation(220, { skippable: true });
     await this.presentOuchLegPullExit(impact);
-    await this.presentOuchTotalWinSequence(gameState.twa || ouchEvent.finalWinAmount || this.currentWin);
+    const cappedTotal = this.clampToWinCap(
+      gameState.twa || ouchEvent.finalWinAmount || this.currentWin
+    );
+    const hitWinCap = gameState.winCapReached === true
+      || ouchEvent.winCapReached === true
+      || this.isWinCapReached(cappedTotal);
+    if (hitWinCap) {
+      await this.presentWinCapSequence(cappedTotal);
+    } else {
+      await this.presentOuchTotalWinSequence(cappedTotal);
+    }
   }
 
   spawnBloodBurst(x, y, groundY, particleCount = 22) {
@@ -2515,6 +2578,8 @@ export class GameScene extends Phaser.Scene {
     bonusTriggered = false,
     teaseMs = 500,
     pauseMs = 450,
+    winCapReached = false,
+    roundTwa = 0,
   } = {}) {
     if (!bounds) return;
 
@@ -2556,6 +2621,15 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(320, () => this.playGiantLaughSfx());
     if (crushedCells.length) {
       await this.presentParallelStompKills(crushedCells, animalKillEvents);
+      if (winCapReached) {
+        await this.waitForStompCoinSettling();
+        const capTarget = this.clampToWinCap(roundTwa);
+        await this.collectStompCoinsToWin(capTarget, { fast: false });
+        this.stompWinCapHandled = true;
+        this.currentWin = capTarget;
+        await this.pullStompFootOut(foot, startY, footScale);
+        return;
+      }
       if (bonusTriggered) {
         await this.presentAnimalKillAngerOvercharge();
       }
@@ -2572,6 +2646,46 @@ export class GameScene extends Phaser.Scene {
 
     await this.waitForPresentation(650, { skippable: true });
 
+    await this.pullStompFootOut(foot, startY, footScale);
+  }
+
+  async presentStompFeature(stompEvent = {}, { roundTwa = 0 } = {}) {
+    if (!stompEvent?.triggered) return;
+    const crushedCells = Array.isArray(stompEvent.crushedCells) ? stompEvent.crushedCells : [];
+    const bounds = this.getStompReelBounds(stompEvent.reels || []);
+    if (!bounds || !crushedCells.length) return;
+
+    const cappedRoundTwa = this.clampToWinCap(roundTwa);
+    const winCapReached = stompEvent.winCapReached === true
+      || this.isWinCapReached(cappedRoundTwa);
+
+    await this.presentStompVisual(bounds, {
+      crushedCells,
+      animalKillEvents: stompEvent.animalKillEvents,
+      bonusTriggered: stompEvent.bonusTriggered,
+      teaseMs: Number(stompEvent.teaseMs) || 500,
+      pauseMs: Number(stompEvent.pauseMs) || 450,
+      winCapReached,
+      roundTwa: cappedRoundTwa,
+    });
+  }
+
+  getWinCap() {
+    return WIN_CAP;
+  }
+
+  clampToWinCap(value = 0) {
+    const amount = Math.max(0, Number(value) || 0);
+    if (WIN_CAP <= 0) return amount;
+    return Math.min(amount, WIN_CAP);
+  }
+
+  isWinCapReached(value = this.currentWin) {
+    return WIN_CAP > 0 && this.clampToWinCap(value) >= WIN_CAP;
+  }
+
+  async pullStompFootOut(foot, startY, footScale) {
+    if (!foot?.active) return;
     await this.tweenPromise({
       targets: foot,
       y: startY,
@@ -2580,21 +2694,6 @@ export class GameScene extends Phaser.Scene {
       duration: 520,
       ease: "Quad.easeIn",
       onComplete: () => foot.destroy(),
-    });
-  }
-
-  async presentStompFeature(stompEvent = {}) {
-    if (!stompEvent?.triggered) return;
-    const crushedCells = Array.isArray(stompEvent.crushedCells) ? stompEvent.crushedCells : [];
-    const bounds = this.getStompReelBounds(stompEvent.reels || []);
-    if (!bounds || !crushedCells.length) return;
-
-    await this.presentStompVisual(bounds, {
-      crushedCells,
-      animalKillEvents: stompEvent.animalKillEvents,
-      bonusTriggered: stompEvent.bonusTriggered,
-      teaseMs: Number(stompEvent.teaseMs) || 500,
-      pauseMs: Number(stompEvent.pauseMs) || 450,
     });
   }
 
@@ -2769,6 +2868,7 @@ export class GameScene extends Phaser.Scene {
     const reel = Number(cell.reel);
     const row = Number(cell.row);
     const target = getCellCenter(reel, row);
+    const grabX = target.x + CRUSH_HAND_TARGET_OFFSET_X;
     const sprite = this.reelSprites[reel]?.[row];
     if (!sprite) return;
 
@@ -2782,7 +2882,7 @@ export class GameScene extends Phaser.Scene {
 
     await this.tweenPromise({
       targets: openHand,
-      x: target.x,
+      x: grabX,
       y: target.y,
       duration: isFirstGrab ? 420 : 360,
       ease: "Cubic.easeOut",
@@ -3436,7 +3536,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   syncCountUpDisplay(value = this.currentWin) {
-    const amount = Number(value) || 0;
+    const amount = this.clampToWinCap(value);
     if (!this.countUpText) return;
     if (this.totalWinTitleText?.visible) {
       this.countUpText.setText(amount.toFixed(2));
@@ -3472,10 +3572,12 @@ export class GameScene extends Phaser.Scene {
     return Phaser.Math.Clamp(80 + delta * 18, 80, 180);
   }
 
-  async updateCountUp(targetValue = 0, { duration = 420, fast = false } = {}) {
-    await this.collectStompCoinsToWin(null, { fast });
+  async updateCountUp(targetValue = 0, { duration = 420, fast = false, skipStompCoinCollect = false } = {}) {
+    if (!skipStompCoinCollect && !this.stompWinCapHandled) {
+      await this.collectStompCoinsToWin(null, { fast });
+    }
 
-    const target = Number(targetValue) || 0;
+    const target = this.clampToWinCap(targetValue);
     if (target <= 0 && this.currentWin <= 0) {
       this.syncCountUpDisplay(0);
       return;
@@ -3515,6 +3617,7 @@ export class GameScene extends Phaser.Scene {
 
   resetForNewSpin() {
     this.currentWin = 0;
+    this.stompWinCapHandled = false;
     this.resetCountUpPresentation();
     this.syncCountUpDisplay(0);
     this.clearStompLandedCoins();

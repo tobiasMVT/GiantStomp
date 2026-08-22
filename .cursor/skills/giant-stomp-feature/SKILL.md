@@ -34,6 +34,8 @@ Dev / forced entry:
 - Drop uses `stompEvent.reelsBeforeStomp` so symbols are visible before the foot lands.
 - `buildSegmentFlow.js` runs `presentStompFeature` after the settle delay.
 - `GameScene.presentStompFeature`: one pre-step boom shake → pause → foot drop → one landing shake → crush VFX → foot slides back up off-screen (no fade).
+- If the round hits `wincap` during the stomp scene, landed coins are collected first, then the foot pulls out immediately (skips hold/overcharge beat).
+- Win amount / total-win count-ups clamp to `client_config.json` `wincap` (currently 10 000). Paid rounds that reach the cap play `presentWinCapSequence` at round end.
 - Animals (`1`–`5`) use `giantstomp` symbol art, blood particles, gibs, and `yellow_coin` atlas animation.
 
 Assets: `src/game-client/assets/giantstomp/`.
