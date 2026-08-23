@@ -37,8 +37,9 @@
     "26": 0,
     "27": 0
   },
+  "** value of each coin type": "",
   "coinTypeValue": {
-    "20": 0.2,
+    "20": 1,
     "21": 2,
     "22": 3,
     "23": 4,
@@ -57,7 +58,7 @@
     "777": 20,
     "888": 16,
     "999": 15,
-    "1000": 10,
+    "1000": 5,
     "0": 0
   },
   "bonusGateForSymbols": {
@@ -69,25 +70,32 @@
     "5": 3,
     "6": 1
   },
+  "** if a TrapPower is certain we increase or decrease the odds for adding 0's": "",
   "adjust0ForBonusGate_TrapPowerValueAffects0odds": {
-    "0": -10,
+    "0": -20,
     "5": -5,
     "10": 0,
-    "20": 5,
-    "50": 10,
-    "100": 15
+    "20": 10,
+    "50": 20,
+    "100": 30
   },
   "bonusWinAmounts": {
     "111": 0.1,
     "222": 0.2,
     "333": 0.3,
-    "444": 0.5,
-    "555": 1,
+    "444": 0.4,
+    "555": 0.5,
     "666": 5,
     "777": 10,
     "888": 25,
     "999": 50,
     "1000": 0
+  },
+  "trapPowerSwapOdds": {
+    "666": { "0": 0, "1": 0, "2": 0, "3": 15 },
+    "777": { "0": 0, "1": 0, "2": 0, "3": 30 },
+    "888": { "0": 0, "1": 0, "2": 0, "3": 50 },
+    "999": { "0": 0, "1": 0, "2": 0, "3": 75 }
   },
   "damageWheelSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
   "paytable": {
@@ -107,11 +115,11 @@
     "displayCapBeforeBonus": 9
   },
   "stompFeature": {
-    "stompReelSize": { "2": 1, "3": 1 },
-    "odds": 0.04
+    "odds": 0.03,
+    "stompReelSize": { "2": 1, "3": 1 }
   },
   "crushFeature": {
-    "odds": 0.04,
+    "odds": 0.03,
     "crushAmount": {"1": 1, "2": 1, "3": 1, "4": 1 }
   },
   "bonusTriggerOdds": {
@@ -124,15 +132,33 @@
     "6": 100
   },
   "angerMeterTickOdds": 0.80,
-  "damageMultilpierStepOdds": 0.75,
+  "damageMultilpierStepOdds": 1,
   "adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds": {
-    "0": { "damageMultilpierStepOdds": 15, "stepsActive": 5 },
+    "0": { "damageMultilpierStepOdds": 15, "stepsActive": 3 },
     "5": { "damageMultilpierStepOdds": 10, "stepsActive": 3 },
     "10": { "damageMultilpierStepOdds": 5, "stepsActive": 3 },
     "20": { "damageMultilpierStepOdds": 0, "stepsActive": 10 },
-    "50": { "damageMultilpierStepOdds": -5, "stepsActive": 10 },
-    "100": { "damageMultilpierStepOdds": -10, "stepsActive": 10 }
+    "50": { "damageMultilpierStepOdds": -25, "stepsActive": 10 },
+    "100": { "damageMultilpierStepOdds": -35, "stepsActive": 10 }
   },
+  "** if a winAmount is certain we increase or decrease the odds for reducing the damage multiplier step odds": "",
+  "damageMultilpierStepOddsReductionBasedOnCurrentWinAmount": {
+    "0": 0,
+    "1": 0.1,
+    "10": 0.2,
+    "15": 0.3,
+    "20": 0.42,
+    "35": 0.52,
+    "40": 0.61,
+    "50": 0.69,
+    "60": 0.78,
+    "75": 0.88,
+    "100": 0.95
+  },
+
+
+
+
   "ouchStompFeature": {
     "stepIntervalMs": 1800,
     "maxCoinsPerStep": 20
@@ -152,8 +178,8 @@
   "maxCascadesPerSpin": 100,
   "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "stompEntry", "crushEntry"],
   "normal": {
-    "noWin": 0,
-    "random": 1,
+    "noWin": 1,
+    "random": 5,
     "bonusEntry": 0
   },
   "noWin": {

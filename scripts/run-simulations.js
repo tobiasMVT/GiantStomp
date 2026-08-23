@@ -373,6 +373,8 @@ const trapPowerPerBonusRound = [];
 const finalMultiplierPerBonusRound = [];
 const animalsCrushedPerRound = [];
 const animalsCrushedInBonusRounds = [];
+const animalsCrushedBetweenBonuses = [];
+const paidSpinsBetweenBonuses = [];
 
 let totalStake = 0;
 let totalPayout = 0;
@@ -393,6 +395,9 @@ let totalAnimalsCrushed = 0;
 let totalAnimalsCrushedInBonusRounds = 0;
 let totalTrapPower = 0;
 let maxTrapPower = 0;
+
+let animalsAccumulatedSinceLastBonus = 0;
+let paidSpinsSinceLastBonus = 0;
 
 const startedAt = performance.now();
 
@@ -467,6 +472,13 @@ for (let i = 1; i <= rounds; i += 1) {
     finalMultiplierPerBonusRound.push(readFinalMultiplier(states));
     animalsCrushedInBonusRounds.push(animalsCrushed);
     totalAnimalsCrushedInBonusRounds += animalsCrushed;
+    animalsCrushedBetweenBonuses.push(animalsAccumulatedSinceLastBonus + animalsCrushed);
+    paidSpinsBetweenBonuses.push(paidSpinsSinceLastBonus + 1);
+    animalsAccumulatedSinceLastBonus = 0;
+    paidSpinsSinceLastBonus = 0;
+  } else {
+    animalsAccumulatedSinceLastBonus += animalsCrushed;
+    paidSpinsSinceLastBonus += 1;
   }
 
   if (progressEvery > 0 && i % progressEvery === 0) {
@@ -535,8 +547,10 @@ const finalMultiplierDistribution = buildWinDistribution(
 
 const avgAnimalsCrushedPerRound =
   completedRounds > 0 ? totalAnimalsCrushed / completedRounds : 0;
-const avgAnimalsCrushedPerBonusRound =
+const avgAnimalsCrushedOnBonusTriggerRound =
   bonusRounds > 0 ? totalAnimalsCrushedInBonusRounds / bonusRounds : 0;
+const avgAnimalsCrushedBetweenBonuses = meanOf(animalsCrushedBetweenBonuses);
+const avgPaidSpinsBetweenBonuses = meanOf(paidSpinsBetweenBonuses);
 const animalsCrushedPerBonusRatio =
   totalAnimalsCrushed > 0 ? totalAnimalsCrushedInBonusRounds / totalAnimalsCrushed : 0;
 
@@ -621,8 +635,16 @@ const report = {
     animalsCrushed: {
       total: totalAnimalsCrushed,
       averagePerRound: Number(avgAnimalsCrushedPerRound.toFixed(4)),
-      averagePerBonusRound: Number(avgAnimalsCrushedPerBonusRound.toFixed(4)),
-      totalInBonusRounds: totalAnimalsCrushedInBonusRounds,
+      averageOnBonusTriggerRound: Number(avgAnimalsCrushedOnBonusTriggerRound.toFixed(4)),
+      averageOnBonusTriggerRoundDefinition:
+        "avg animals crushed on the single paid spin that entered bonus (stomp/crush kills only)",
+      averageBetweenBonuses: Number(avgAnimalsCrushedBetweenBonuses.toFixed(4)),
+      averageBetweenBonusesDefinition:
+        "avg cumulative animals crushed across paid spins from after the previous bonus until each bonus entry (inclusive)",
+      averagePaidSpinsBetweenBonuses: Number(avgPaidSpinsBetweenBonuses.toFixed(4)),
+      averagePaidSpinsBetweenBonusesDefinition:
+        "avg paid spins between consecutive bonus entries (inclusive of the triggering spin)",
+      totalInBonusTriggerRounds: totalAnimalsCrushedInBonusRounds,
       animalsCrushedPerBonusRatio: fourDecimals(animalsCrushedPerBonusRatio),
       animalsCrushedPerBonusRatioDefinition:
         "share of all crushed animals that occurred in rounds that entered bonus"
@@ -652,7 +674,8 @@ console.log(`Avg trap power:   ${report.bonus.trapPower.average}  (max ${report.
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);
 console.log(`Crush feature:    ${report.features.crushFeature.frequency} (${report.features.crushFeature.triggeredRounds} rounds)`);
 console.log(`Animals crushed:  ${report.features.animalsCrushed.total} total, ${report.features.animalsCrushed.averagePerRound} avg/round`);
-console.log(`Animals/bonus:    ${report.features.animalsCrushed.averagePerBonusRound} avg when bonus, ratio ${report.features.animalsCrushed.animalsCrushedPerBonusRatio}`);
+console.log(`Animals/trigger:  ${report.features.animalsCrushed.averageOnBonusTriggerRound} avg on bonus-entry spin, ratio ${report.features.animalsCrushed.animalsCrushedPerBonusRatio}`);
+console.log(`Animals/bonus:    ${report.features.animalsCrushed.averageBetweenBonuses} avg crushed between bonuses (${report.features.animalsCrushed.averagePaidSpinsBetweenBonuses} paid spins)`);
 console.log(`Main var/std:     ${report.mainGame.variance} / ${report.mainGame.stdDev}`);
 console.log(`Bonus var/std:    ${report.bonus.variance} / ${report.bonus.stdDev}`);
 printWinDistribution("Main game win distribution", report.mainGame.winDistribution);

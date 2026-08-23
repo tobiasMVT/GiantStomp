@@ -53,12 +53,10 @@ The bonus ends after three consecutive empty spins.
 
 When the bonus ends, `resolveOuchStomp()` runs on the final trap power and damage wheel.
 Step 1 always consumes the leftmost remaining segment; each extra step rolls against
-`damageMultilpierStepOdds` (default `0.75`). Trap power can temporarily shift those draw
-odds via `adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds`: use the bracket
-whose key is the largest value still `<= trapPower` (same range semantics as the bonus
-gate table). Apply `damageMultilpierStepOdds` as a percentage-point delta for the first
-`stepsActive` continuation **draws** only (not the free first step), then revert to base
-odds. Win per step is `trapPower × segment value`;
+`damageMultilpierStepOdds` (default `0.65`). Before each continuation draw, subtract the
+bracket from `damageMultilpierStepOddsReductionBasedOnCurrentWinAmount` using the last
+step's `winTbm` (`trapPower × active multiplier`). Brackets use the same floor semantics as
+the bonus gate table. Win per step is `trapPower × segment value`;
 the credited win is the **last** step's `winAmount`, attached as `ouchStompEvent` on the
 final bonus `freespin` state and added to `twa`.
 
@@ -68,7 +66,13 @@ whether the spin resets it.
 
 Trap symbols `666`, `777`, `888`, and `999` increment separate four-light collections.
 Their displayed power is awarded once, when the fourth light lands, and that trap's
-progress then resets to zero so it can be collected again. Landings carry
+progress then resets to zero so it can be collected again. Before bonus symbols are injected,
+`buildBonusSymbolWeights()` may shift weight from near-complete traps into low materials
+(`111`–`555`): when a trap's light progress matches a configured `trapPowerSwapOdds` key
+(e.g. `"3"` = three lights filled, one short of completion), that percentage of the trap's
+`bonusSymbolWeights` entry is removed and redistributed across low materials by their existing
+relative weights. Injection then rolls normally from the adjusted table — nothing is swapped
+after landing. Landings carry
 `trapLightsFilled` (lights shown before the reset) and `completedTrap`. Symbol `1000` is
 a damage multiplier: it removes the lowest remaining value from `damageWheelSegments`
 instead of using sockets. Symbols `111`–`555` add power immediately. Bonus states

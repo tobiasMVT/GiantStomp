@@ -368,6 +368,43 @@ test("low trap power increases symbol landing chance versus high trap power", ()
   assert.equal(highPowerBoard.flat().filter((symbol) => symbol !== emptySymbol).length, 0);
 });
 
+test("trap power swap gate shifts bonusSymbolWeights toward low materials", () => {
+  const server = new GameServer();
+
+  assert.equal(server.resolveTrapPowerSwapOdds(666, 2), 0);
+  assert.equal(server.resolveTrapPowerSwapOdds(666, 3), 15);
+  assert.equal(server.resolveTrapPowerSwapOdds(999, 3), 75);
+
+  const baseline = server.buildBonusSymbolWeights({});
+  assert.equal(baseline["666"], Number(serverConfig.bonusSymbolWeights["666"]));
+
+  const gated = server.buildBonusSymbolWeights({ "666": 3 });
+  assert.ok(gated["666"] < baseline["666"]);
+  assert.ok(gated["111"] > baseline["111"]);
+  assert.ok(gated["555"] > baseline["555"]);
+
+  const lowMaterials = new Set([111, 222, 333, 444, 555]);
+  let lowCount = 0;
+  const trials = 500;
+  for (let i = 0; i < trials; i += 1) {
+    const board = server.generateBonusBoard({ trapPower: 0, trapProgress: { "666": 3, "777": 0, "888": 0, "999": 0 } });
+    for (const symbol of board.flat()) {
+      if (lowMaterials.has(symbol)) lowCount += 1;
+    }
+  }
+  const baselineLowCount = (() => {
+    let count = 0;
+    for (let i = 0; i < trials; i += 1) {
+      const board = server.generateBonusBoard({ trapPower: 0, trapProgress: {} });
+      for (const symbol of board.flat()) {
+        if (lowMaterials.has(symbol)) count += 1;
+      }
+    }
+    return count;
+  })();
+  assert.ok(lowCount > baselineLowCount);
+});
+
 test("traps award power only on four lights and damage removes the lowest meter segment", () => {
   const server = new GameServer();
   const board = Array.from({ length: 5 }, () => Array(3).fill(0));
@@ -496,47 +533,51 @@ test("resolveOuchStomp skips when trap power is zero", () => {
   assert.equal(result.winAmount, 0);
 });
 
-test("resolveOuchStomp applies trap-power odds boost only on the first N continuation draws", () => {
+test("resolveDamageStepOddsBoost still resolves trap-power bracket table", () => {
   const server = new GameServer({ random: () => 0 });
 
   assert.deepEqual(server.resolveDamageStepOddsBoost(0), {
     oddsDeltaPercent: 15,
-    stepsActive: 5
+    stepsActive: 3
   });
   assert.deepEqual(server.resolveDamageStepOddsBoost(5), {
     oddsDeltaPercent: 10,
     stepsActive: 3
   });
-  assert.equal(server.resolveDamageStepOddsForDraw(0.75, 0, server.resolveDamageStepOddsBoost(5)), 0.85);
-  assert.equal(server.resolveDamageStepOddsForDraw(0.75, 2, server.resolveDamageStepOddsBoost(5)), 0.85);
-  assert.equal(server.resolveDamageStepOddsForDraw(0.75, 3, server.resolveDamageStepOddsBoost(5)), 0.75);
-  assert.deepEqual(server.resolveDamageStepOddsBoost(4), {
-    oddsDeltaPercent: 15,
-    stepsActive: 5
-  });
+  assert.equal(server.resolveDamageStepOddsForDraw(0.65, 0, server.resolveDamageStepOddsBoost(5)), 0.75);
+  assert.equal(server.resolveDamageStepOddsForDraw(0.65, 2, server.resolveDamageStepOddsBoost(5)), 0.75);
+  assert.equal(server.resolveDamageStepOddsForDraw(0.65, 3, server.resolveDamageStepOddsBoost(5)), 0.65);
 });
 
-test("resolveOuchStomp uses boosted draw odds before reverting to base odds", () => {
+test("resolveOuchStomp reduces continuation odds as current winTbm grows", () => {
+  const server = new GameServer({ random: () => 0 });
+
+  assert.equal(server.resolveWinAmountOddsReduction(0), 0);
+  assert.equal(server.resolveWinAmountOddsReduction(10), 0.16);
+  assert.equal(server.resolveWinAmountOddsReduction(50), 0.69);
+  assert.equal(server.resolveDamageStepOddsForCurrentWin(0.65, 50), 0);
+  assert.equal(server.resolveDamageStepOddsForCurrentWin(0.65, 5), 0.65);
+});
+
+test("resolveOuchStomp stops early when current win already exceeds brake threshold", () => {
   const damageWheel = {
     segments: [1, 2, 3, 4],
     removedSegments: [],
     remainingSegments: [1, 2, 3, 4],
   };
-  const makeServer = () => {
-    let roll = 0;
-    return new GameServer({
-      random: () => {
+  const blocked = new GameServer({ random: () => 0.1 }).resolveOuchStomp(50, damageWheel, 1);
+  assert.equal(blocked.event.steps.length, 1);
+
+  const continued = new GameServer({
+    random: (() => {
+      let roll = 0;
+      return () => {
         roll += 1;
-        return roll === 1 ? 0.8 : 0.86;
-      }
-    });
-  };
-
-  const boosted = makeServer().resolveOuchStomp(5, damageWheel, 1);
-  const baseline = makeServer().resolveOuchStomp(20, damageWheel, 1);
-
-  assert.equal(boosted.event.steps.length, 2);
-  assert.equal(baseline.event.steps.length, 1);
+        return roll === 1 ? 0.1 : 0.99;
+      };
+    })(),
+  }).resolveOuchStomp(5, damageWheel, 1);
+  assert.equal(continued.event.steps.length, 2);
 });
 
 test("bonus end attaches ouchStompEvent and credits twa", async () => {

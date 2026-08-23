@@ -49,6 +49,7 @@ export function queueGameSceneAssets(load, _deps = {}) {
   for (let lives = 1; lives <= 3; lives += 1) {
     load.image(`bonus_life_${lives}`, `assets/giantstomp/bonus symbol/life${lives}.png`);
   }
+  load.image("bonus_intro", "assets/giantstomp/bonus symbol/bonus_intro.png");
 
   load.image("giantfoot", "assets/giantstomp/giantfoot.png");
   load.image("open_hand", "assets/giantstomp/open_hand.png");

@@ -221,6 +221,56 @@ export class GameServer {
     return Number(entry) || 0;
   }
 
+  resolveTrapPowerSwapOdds(symbol, progressBefore = 0) {
+    const table = serverConfig.trapPowerSwapOdds?.[String(symbol)];
+    if (!table || typeof table !== "object") return 0;
+    const progress = Math.max(0, Math.floor(Number(progressBefore) || 0));
+    return Number(table[String(progress)]) || 0;
+  }
+
+  getLowMaterialSymbols() {
+    return (serverConfig.bonus?.guaranteedPowerSeedSymbols || [111, 222, 333, 444, 555])
+      .map(Number)
+      .filter((symbol) => Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0) > 0);
+  }
+
+  buildBonusSymbolWeights(trapProgress = {}) {
+    const weights = Object.fromEntries(
+      Object.entries(serverConfig.bonusSymbolWeights || {})
+        .map(([symbol, weight]) => [symbol, Number(weight) || 0])
+        .filter(([, weight]) => weight > 0)
+    );
+    const trapSymbols = (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map(Number);
+    const lowSymbols = this.getLowMaterialSymbols();
+    const lowWeightTotal = lowSymbols.reduce(
+      (sum, symbol) => sum + (Number(weights[String(symbol)]) || 0),
+      0
+    );
+    if (lowWeightTotal <= 0) return weights;
+
+    for (const trapSymbol of trapSymbols) {
+      const trapKey = String(trapSymbol);
+      const trapWeight = Number(weights[trapKey] || 0);
+      if (trapWeight <= 0) continue;
+
+      const swapOddsPercent = this.resolveTrapPowerSwapOdds(
+        trapSymbol,
+        Number(trapProgress[trapKey] || 0)
+      );
+      if (swapOddsPercent <= 0) continue;
+
+      const swapWeight = trapWeight * (swapOddsPercent / 100);
+      weights[trapKey] = trapWeight - swapWeight;
+      for (const lowSymbol of lowSymbols) {
+        const lowKey = String(lowSymbol);
+        const lowShare = Number(weights[lowKey] || 0) / lowWeightTotal;
+        weights[lowKey] = Number(weights[lowKey] || 0) + (swapWeight * lowShare);
+      }
+    }
+
+    return weights;
+  }
+
   resolveDamageStepOddsBoost(trapPower = 0) {
     const entry = this.resolveTrapPowerFloorBracket(
       serverConfig.adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds,
@@ -239,6 +289,20 @@ export class GameServer {
       return normalizedBase;
     }
     return Math.min(1, Math.max(0, normalizedBase + (boost.oddsDeltaPercent / 100)));
+  }
+
+  resolveWinAmountOddsReduction(currentWinTbm = 0) {
+    const entry = this.resolveTrapPowerFloorBracket(
+      serverConfig.damageMultilpierStepOddsReductionBasedOnCurrentWinAmount,
+      currentWinTbm
+    );
+    return Number(entry) || 0;
+  }
+
+  resolveDamageStepOddsForCurrentWin(baseOdds, currentWinTbm) {
+    const normalizedBase = Number(baseOdds) || 0;
+    const reduction = this.resolveWinAmountOddsReduction(currentWinTbm);
+    return Math.min(1, Math.max(0, normalizedBase - reduction));
   }
 
   buildBonusGateWeights({ trapPower = 0, forceSymbolLanding = false } = {}) {
@@ -270,7 +334,7 @@ export class GameServer {
     return cells.slice(0, picks);
   }
 
-  generateBonusBoard({ trapPower = 0, forceSymbolLanding = false } = {}) {
+  generateBonusBoard({ trapPower = 0, forceSymbolLanding = false, trapProgress = {} } = {}) {
     const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
     const gateWeights = this.buildBonusGateWeights({ trapPower, forceSymbolLanding });
     const symbolCount = this.randomWeightedCount(gateWeights);
@@ -279,7 +343,7 @@ export class GameServer {
     );
     if (symbolCount <= 0) return board;
 
-    const symbolWeights = serverConfig.bonusSymbolWeights || {};
+    const symbolWeights = this.buildBonusSymbolWeights(trapProgress);
     for (const { reel, row } of this.pickRandomCells(symbolCount)) {
       board[reel][row] = this.randomSymbol(symbolWeights);
     }
@@ -325,7 +389,8 @@ export class GameServer {
     spinIndex,
     isBonus,
     forceSymbolLanding = false,
-    trapPower = 0
+    trapPower = 0,
+    trapProgress = {}
   }) {
     if (this.boardProvider) {
       const supplied = this.boardProvider({ action, ticket, spinIndex, isBonus });
@@ -365,7 +430,7 @@ export class GameServer {
       return board;
     }
     return isBonus
-      ? this.generateBonusBoard({ trapPower, forceSymbolLanding })
+      ? this.generateBonusBoard({ trapPower, forceSymbolLanding, trapProgress })
       : this.generateRandomBoard(serverConfig.symbolWeights);
   }
 
@@ -633,7 +698,8 @@ export class GameServer {
         spinIndex,
         isBonus: true,
         forceSymbolLanding,
-        trapPower: Number(trapTracker.power) || 0
+        trapPower: Number(trapTracker.power) || 0,
+        trapProgress: trapTracker.progress,
       });
       if (!this.boardProvider) {
         board = this.injectGuaranteedBonusPowerSeed(board, trapTracker, spinIndex);
@@ -684,7 +750,6 @@ export class GameServer {
       ? rawRemaining
       : (power > 0 ? [configuredSegments[0] || 1] : []);
     const baseStepOdds = Number(serverConfig.damageMultilpierStepOdds ?? 0.66);
-    const stepOddsBoost = this.resolveDamageStepOddsBoost(power);
     const cfg = serverConfig.ouchStompFeature || {};
     const stepIntervalMs = Math.max(0, Number(cfg.stepIntervalMs) || 3000);
     const maxCoinsPerStep = Math.max(1, Number(cfg.maxCoinsPerStep) || 20);
@@ -714,10 +779,9 @@ export class GameServer {
     };
 
     pushStep(workingRemaining.shift());
-    let drawIndex = 0;
     while (workingRemaining.length > 0) {
-      const stepOdds = this.resolveDamageStepOddsForDraw(baseStepOdds, drawIndex, stepOddsBoost);
-      drawIndex += 1;
+      const currentWinTbm = steps.at(-1)?.winTbm ?? 0;
+      const stepOdds = this.resolveDamageStepOddsForCurrentWin(baseStepOdds, currentWinTbm);
       if (this.random() >= stepOdds) break;
       pushStep(workingRemaining.shift());
     }

@@ -33,6 +33,10 @@ Each newly landed scatter still animates, but bonus entry now comes from crushed
 On stomp impact every crushed cell dies, bleeds, and drops coins together while anger
 embers fly in parallel; meter segments only fill on successful server ticks. Bonus entry
 then overcharges the meter one step at a time to 10 with streams from every kill point.
+Before the first freespin begins, `bonustransition` now detours through
+`bonus_intro.png`: the main game fades down into a full-scene animal war-room beat with
+a slow push-in, warm dusk glow, and blueprint sparkles, then fades onward into the
+bonus background and HUD.
 
 The bonus crossfades to `background_bonus.png` while retaining the reel frame. Its
 `freespin` action uses a reel-spin presentation and the `111`–`999` bonus symbol art;

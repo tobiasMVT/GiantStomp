@@ -34,6 +34,17 @@ const CASH_BONUS_SYMBOLS = new Set([111, 222, 333, 444, 555]);
 const TRAP_SYMBOLS = [666, 777, 888, 999];
 const DAMAGE_SYMBOL = 1000;
 const DEFAULT_DAMAGE_METER_SEGMENTS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+const BONUS_INTRO_SCALE = 1.06;
+const BONUS_INTRO_DRIFT_X = 22;
+const BONUS_INTRO_DRIFT_Y = -18;
+const BONUS_INTRO_HOLD_MS = 1500;
+const BONUS_INTRO_SPARKLES = [
+  { x: -214, y: 20, radius: 8, color: 0xffcc73 },
+  { x: -126, y: 50, radius: 6, color: 0x7dd3fc },
+  { x: -18, y: -44, radius: 7, color: 0xfff1a8 },
+  { x: 102, y: 16, radius: 6, color: 0x93c5fd },
+  { x: 206, y: -10, radius: 8, color: 0xffd47a },
+];
 
 function getMultiplierSegmentColor(index, total) {
   const ratio = total <= 1 ? 0 : index / (total - 1);
@@ -96,10 +107,13 @@ const DEPTH = {
   crushHand: 12,
   symbols: 10,
   crushGrab: 12,
+  crushGrabSymbol: 13,
   effects: 20,
   stomp: 25,
   stompVfx: 27,
   angerVfx: 28,
+  transition: 29,
+  transitionFx: 29.5,
   ui: 30,
 };
 const STOMP_COIN_SCALE_MIN = 0.13;
@@ -177,6 +191,7 @@ export class GameScene extends Phaser.Scene {
     this.countUpLabel = "WIN";
     this.freespinCounterValue = null;
     this.isInBonusMode = false;
+    this.isBonusUiVisible = false;
     this.isPostBonusOuch = false;
     this.ouchScrollY = 0;
     this.ouchTheme = null;
@@ -192,6 +207,11 @@ export class GameScene extends Phaser.Scene {
     this.stompCoinLaunchPromises = [];
     this.stompWinCapHandled = false;
     this.totalWinBackground = null;
+    this.bonusIntroImage = null;
+    this.bonusIntroShade = null;
+    this.bonusIntroSunGlow = null;
+    this.bonusIntroBlueprintGlow = null;
+    this.bonusIntroSparkles = [];
     this.bonusUi = [];
     this.lifeSegments = [];
     this.trapPowerText = null;
@@ -249,6 +269,7 @@ export class GameScene extends Phaser.Scene {
       this.layoutBackgroundImage(image);
     });
     this.layoutBackgroundImage(this.ouchBackground, OUCH_BACKGROUND_SCALE);
+    this.createBonusIntroScene();
     this.reelFrame = this.add.image(x, y, "reel_frame").setDepth(DEPTH.board);
     const reelFrameSource = this.reelFrame.texture.getSourceImage?.();
     if (reelFrameSource?.width && reelFrameSource?.height) {
@@ -310,6 +331,57 @@ export class GameScene extends Phaser.Scene {
     this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
 
     this.createBonusUi();
+  }
+
+  createBonusIntroScene() {
+    const layout = this.getBonusIntroLayout();
+    this.bonusIntroImage = this.add.image(layout.centerX, layout.centerY, "bonus_intro")
+      .setDepth(DEPTH.transition)
+      .setAlpha(0);
+    this.layoutBackgroundImage(this.bonusIntroImage, BONUS_INTRO_SCALE);
+    this.bonusIntroSunGlow = this.add.ellipse(
+      layout.sunX,
+      layout.sunY,
+      440,
+      210,
+      0xffb25f,
+      0.22
+    )
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(DEPTH.transitionFx - 1)
+      .setAlpha(0);
+    this.bonusIntroBlueprintGlow = this.add.ellipse(
+      layout.blueprintX,
+      layout.blueprintY,
+      560,
+      190,
+      0x5ba6ff,
+      0.18
+    )
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(DEPTH.transitionFx)
+      .setAlpha(0);
+    this.bonusIntroShade = this.add.rectangle(
+      layout.centerX,
+      layout.centerY,
+      GRID_WIDTH_PX + 760,
+      GRID_HEIGHT_PX + 760,
+      0x050811,
+      0.54
+    )
+      .setDepth(DEPTH.transitionFx)
+      .setAlpha(0);
+    this.bonusIntroSparkles = BONUS_INTRO_SPARKLES.map(({ x, y, radius, color }) => this.add.circle(
+      layout.blueprintX + x,
+      layout.blueprintY + y,
+      radius,
+      color,
+      0.88
+    )
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(DEPTH.transitionFx)
+      .setAlpha(0));
+    this.resetBonusIntroScene();
   }
 
   createBonusUi() {
@@ -722,6 +794,7 @@ export class GameScene extends Phaser.Scene {
     if (this.totalWinTitleText?.visible) {
       this.layoutTotalWinTexts();
     }
+    this.layoutBonusIntroScene();
   }
 
   getTotalWinTextLayout() {
@@ -748,6 +821,144 @@ export class GameScene extends Phaser.Scene {
 
   getOuchUiYOffset() {
     return this.isPostBonusOuch ? OUCH_UI_OFFSET_Y : 0;
+  }
+
+  getBonusIntroLayout() {
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX / 2 - 10;
+    const blueprintX = centerX - 6;
+    const blueprintY = centerY + GRID_HEIGHT_PX * 0.32;
+    return {
+      centerX,
+      centerY,
+      sunX: centerX + 8,
+      sunY: centerY - GRID_HEIGHT_PX * 0.34,
+      blueprintX,
+      blueprintY,
+    };
+  }
+
+  layoutBonusIntroScene() {
+    if (!this.bonusIntroImage) return;
+    const layout = this.getBonusIntroLayout();
+    this.layoutBackgroundImage(this.bonusIntroImage, BONUS_INTRO_SCALE);
+    this.bonusIntroImage.setPosition(layout.centerX, layout.centerY);
+    this.bonusIntroShade?.setPosition(layout.centerX, layout.centerY);
+    this.bonusIntroSunGlow?.setPosition(layout.sunX, layout.sunY);
+    this.bonusIntroBlueprintGlow?.setPosition(layout.blueprintX, layout.blueprintY);
+    this.bonusIntroSparkles?.forEach((sparkle, index) => {
+      const spec = BONUS_INTRO_SPARKLES[index];
+      if (!spec) return;
+      sparkle.setPosition(layout.blueprintX + spec.x, layout.blueprintY + spec.y);
+    });
+  }
+
+  resetBonusIntroScene() {
+    if (!this.bonusIntroImage) return;
+    this.layoutBonusIntroScene();
+    const baseScaleX = this.bonusIntroImage.scaleX;
+    const baseScaleY = this.bonusIntroImage.scaleY;
+    this.bonusIntroImage
+      .setScale(baseScaleX, baseScaleY)
+      .setAlpha(0);
+    this.bonusIntroShade
+      .setAlpha(0);
+    this.bonusIntroSunGlow
+      .setScale(1)
+      .setAlpha(0);
+    this.bonusIntroBlueprintGlow
+      .setScale(1)
+      .setAlpha(0);
+    this.bonusIntroSparkles?.forEach((sparkle) => sparkle.setScale(1).setAlpha(0));
+  }
+
+  async presentBonusIntroScene() {
+    this.resetBonusIntroScene();
+    this.mainTheme?.stop();
+    this.crushBackground?.setAlpha(0);
+    const introImage = this.bonusIntroImage;
+    if (!introImage) {
+      this.startBonusTheme();
+      await Promise.all([
+        this.tweenPromise({ targets: this.background, alpha: 0, duration: 450 }),
+        this.tweenPromise({ targets: this.bonusBackground, alpha: 1, duration: 450 }),
+        this.fadeMainGameSymbols(0, 450),
+      ]);
+      return;
+    }
+
+    const introFxTargets = [
+      this.bonusIntroShade,
+      this.bonusIntroSunGlow,
+      this.bonusIntroBlueprintGlow,
+      ...this.bonusIntroSparkles,
+    ].filter(Boolean);
+
+    await Promise.all([
+      this.tweenPromise({ targets: this.background, alpha: 0.08, duration: 420, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.reelFrame, alpha: 0, duration: 420, ease: "Quad.easeInOut" }),
+      this.fadeMainGameSymbols(0, 420),
+      this.tweenPromise({ targets: introImage, alpha: 1, duration: 520, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.bonusIntroShade, alpha: 0.52, duration: 520, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.bonusIntroSunGlow, alpha: 0.24, duration: 560, ease: "Sine.easeOut" }),
+      this.tweenPromise({
+        targets: this.bonusIntroBlueprintGlow,
+        alpha: 0.2,
+        duration: 560,
+        ease: "Sine.easeOut",
+      }),
+    ]);
+
+    this.playRandomConstructionSfx();
+    const sparkleMotion = this.bonusIntroSparkles.map((sparkle, index) => this.tweenPromise({
+      targets: sparkle,
+      alpha: 0.16 + (index % 2) * 0.06,
+      x: sparkle.x + (index % 2 === 0 ? 14 : -12),
+      y: sparkle.y - 20 - index * 2,
+      scaleX: 1.15,
+      scaleY: 1.15,
+      delay: index * 55,
+      duration: BONUS_INTRO_HOLD_MS - 160 + index * 40,
+      ease: "Sine.easeInOut",
+    }));
+    await Promise.all([
+      this.tweenPromise({
+        targets: introImage,
+        x: introImage.x + BONUS_INTRO_DRIFT_X,
+        y: introImage.y + BONUS_INTRO_DRIFT_Y,
+        scaleX: introImage.scaleX * 1.05,
+        scaleY: introImage.scaleY * 1.05,
+        duration: BONUS_INTRO_HOLD_MS,
+        ease: "Sine.easeInOut",
+      }),
+      this.tweenPromise({
+        targets: this.bonusIntroSunGlow,
+        alpha: 0.34,
+        scaleX: 1.12,
+        scaleY: 1.08,
+        duration: BONUS_INTRO_HOLD_MS,
+        ease: "Sine.easeInOut",
+      }),
+      this.tweenPromise({
+        targets: this.bonusIntroBlueprintGlow,
+        alpha: 0.28,
+        scaleX: 1.08,
+        scaleY: 1.04,
+        duration: BONUS_INTRO_HOLD_MS,
+        ease: "Sine.easeInOut",
+      }),
+      ...sparkleMotion,
+    ]);
+
+    this.startBonusTheme();
+    await Promise.all([
+      this.tweenPromise({ targets: this.background, alpha: 0, duration: 420, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.bonusBackground, alpha: 1, duration: 460, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.reelFrame, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: introImage, alpha: 0, duration: 380, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: introFxTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
+    ]);
+    this.resetBonusIntroScene();
   }
 
   layoutDamageMeterChrome() {
@@ -859,6 +1070,7 @@ export class GameScene extends Phaser.Scene {
   async dropSymbols(reels, { getTextureKey = null } = {}) {
     const tweens = [];
     for (let reel = 0; reel < REELS; reel += 1) {
+      let playedReelLandSound = false;
       for (let row = 0; row < ROWS; row += 1) {
         const symbol = getSymbol(reels, reel, row);
         if (symbol === null || Number(symbol) <= 0) continue;
@@ -879,7 +1091,11 @@ export class GameScene extends Phaser.Scene {
           delay: reel * 65 + row * 32,
           ease: SYMBOL_LAND_EASE,
           easeParams: SYMBOL_LAND_EASE_PARAMS,
-          onStart: () => this.playSfx(`land${reel + 1}`, { volume: 0.28 }),
+          onStart: () => {
+            if (playedReelLandSound) return;
+            playedReelLandSound = true;
+            this.playSfx(`land${reel + 1}`, { volume: 0.28 });
+          },
         }));
       }
     }
@@ -3097,6 +3313,8 @@ export class GameScene extends Phaser.Scene {
 
     openHand.setDepth(DEPTH.crushGrab);
     snappedHand.setDepth(DEPTH.crushGrab);
+    sprite.setDepth(DEPTH.crushGrabSymbol);
+
     await this.tweenPromise({
       targets: openHand,
       scaleX: handScale * 1.05,
@@ -3106,8 +3324,6 @@ export class GameScene extends Phaser.Scene {
       onUpdate: () => this.syncCrushHandPair(openHand, snappedHand),
     });
     this.syncCrushHandPair(openHand, snappedHand);
-
-    sprite.setDepth(DEPTH.crushGrab - 1);
 
     await this.presentMiniSqueezeShake(openHand, 300);
     this.syncCrushHandPair(openHand, snappedHand);
@@ -3188,6 +3404,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   setBonusUiVisible(visible) {
+    this.isBonusUiVisible = visible === true;
     this.bonusUi?.forEach((item) => item?.setVisible(visible));
     this.damageMeterObjects?.forEach((item) => item?.setVisible(visible));
     this.freespinText?.setVisible(false);
@@ -3200,6 +3417,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   setOuchUiVisible(visible) {
+    this.isBonusUiVisible = false;
     this.setBonusUiVisible(false);
     this.setAngerUiVisible(false);
     this.damageMeterObjects?.forEach((item) => item?.setVisible(visible));
@@ -3291,7 +3509,7 @@ export class GameScene extends Phaser.Scene {
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
     const y = GRID_OFFSET_Y + GRID_HEIGHT_PX + 94 + this.getOuchUiYOffset();
     const powerLabel = `TRAP POWER ${Math.max(0, Number(power) || 0).toFixed(2)}`;
-    const visible = this.isInBonusMode || this.isPostBonusOuch;
+    const visible = this.isBonusUiVisible || this.isPostBonusOuch;
 
     this.trapPowerText?.setText(powerLabel);
     if (multiplier === null || !this.trapPowerMultiplierText) {
@@ -3901,19 +4119,16 @@ export class GameScene extends Phaser.Scene {
 
   async enterBonus(gameState = {}) {
     this.isInBonusMode = true;
-    this.startBonusTheme();
     this.setAngerUiVisible(false);
     this.totalWinBackground?.setAlpha(0);
     this.reelFrame?.setAlpha(1);
     this.resetCountUpPresentation();
-    this.setBonusUiVisible(true);
+    this.setBonusUiVisible(false);
+    this.hideFreespinCounter();
     this.countUpText?.setVisible(false);
     this.updateBonusState(gameState.bonusState, gameState.trapMeter, gameState.damageWheel);
-    await Promise.all([
-      this.tweenPromise({ targets: this.background, alpha: 0, duration: 450 }),
-      this.tweenPromise({ targets: this.bonusBackground, alpha: 1, duration: 450 }),
-      this.fadeMainGameSymbols(0, 450),
-    ]);
+    await this.presentBonusIntroScene();
+    this.setBonusUiVisible(true);
   }
 
   async presentBonusExitSequence(gameState = {}) {
@@ -3938,6 +4153,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.isInBonusMode && !this.isPostBonusOuch) return;
     this.isInBonusMode = false;
     this.isPostBonusOuch = false;
+    this.resetBonusIntroScene();
     this.hideFreespinCounter();
     this.setBonusUiVisible(false);
     this.setOuchUiVisible(false);

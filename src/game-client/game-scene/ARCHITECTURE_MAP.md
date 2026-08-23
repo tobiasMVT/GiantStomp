@@ -10,7 +10,7 @@ The previous feature-module facade has been removed. `GameScene.js` is now a com
 
 - `spin`: leave bonus if needed, reset win, slide old board out, full-board drop
 - `respin`: apply downward `dropEvent.movements`
-- `bonustransition`: crossfade bonus background/theme and initialize lives/trap meters
+- `bonustransition`: fade main game into the `bonus_intro.png` planning scene, then into the bonus background/theme and initialized lives/trap meters
 - `freespin`: spin the bonus reels, reveal cash, update lives, and collect traps
 - bonus exit (after last `freespin` with `nextAction === "spin"`): ouch background, fake spin, `presentOuchStompSequence`
 - `freerespin`: legacy compatibility only; the cash bonus does not cascade
