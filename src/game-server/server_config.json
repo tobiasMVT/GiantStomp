@@ -180,7 +180,7 @@
   "normal": {
     "noWin": 1,
     "random": 5,
-    "bonusEntry": 0
+    "bonusEntry": 11
   },
   "noWin": {
     "noWin": 1

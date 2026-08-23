@@ -222,6 +222,11 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
     this.damageMeterSlots = [];
+    this.damageMeterOrientation = "bonus";
+    this.damageMeterBankedCount = 0;
+    this.damageMeterPanel = null;
+    this.damageMeterTitle = null;
+    this.damageMeterStatusText = null;
     this.damageMeterActiveIndex = 0;
     this.damageMeterState = {
       segments: [...DEFAULT_DAMAGE_METER_SEGMENTS],
@@ -462,50 +467,93 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
     this.damageMeterValues = [];
+    this.damageMeterOrientation = this.isPostBonusOuch ? "ouch" : "bonus";
     const values = Array.isArray(segments) && segments.length
       ? segments.map(Number)
       : [...DEFAULT_DAMAGE_METER_SEGMENTS];
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
     const bottom = GRID_OFFSET_Y + GRID_HEIGHT_PX;
-    const gap = 3;
-    const segmentWidth = (GRID_WIDTH_PX - gap * (values.length - 1)) / values.length;
+    const isOuch = this.damageMeterOrientation === "ouch";
+    const gap = isOuch ? 2 : 3;
+    const railHeight = GRID_HEIGHT_PX - 28;
+    const segmentWidth = isOuch
+      ? 70
+      : (GRID_WIDTH_PX - gap * (values.length - 1)) / values.length;
+    const segmentHeight = isOuch
+      ? Math.max(13, (railHeight - gap * (values.length - 1)) / values.length)
+      : 24;
+    const railX = GRID_OFFSET_X + 48;
+    const railTop = GRID_OFFSET_Y + 14 + OUCH_UI_OFFSET_Y;
     this.damageMeterValues = [...values];
     this.damageMeterSlots = values.map((_, index) => ({
-      x: GRID_OFFSET_X + segmentWidth / 2 + index * (segmentWidth + gap),
-      y: bottom + 129,
+      x: isOuch ? railX : GRID_OFFSET_X + segmentWidth / 2 + index * (segmentWidth + gap),
+      y: isOuch
+        ? railTop + segmentHeight / 2 + index * (segmentHeight + gap)
+        : bottom + 129,
     }));
-    const panel = this.add.rectangle(centerX, bottom + 129, GRID_WIDTH_PX + 18, 34, 0x07110d, 0.86)
+    this.damageMeterPanel = this.add.rectangle(
+      isOuch ? railX : centerX,
+      isOuch ? railTop + railHeight / 2 : bottom + 129,
+      isOuch ? segmentWidth + 16 : GRID_WIDTH_PX + 18,
+      isOuch ? railHeight + 38 : 34,
+      0x07110d,
+      0.86
+    )
       .setStrokeStyle(2, 0xd8c26a, 0.6)
       .setDepth(DEPTH.ui - 1);
-    this.damageMeterObjects.push(panel);
-    const title = this.add.text(centerX, bottom + 111, "MULTIPLIER", {
+    this.damageMeterObjects.push(this.damageMeterPanel);
+    this.damageMeterTitle = this.add.text(
+      isOuch ? railX : centerX,
+      isOuch ? railTop - 16 : bottom + 111,
+      isOuch ? "STOMP DEPTH" : "MULTIPLIER",
+      {
       fontFamily: "Arial Black, Arial",
-      fontSize: "12px",
+      fontSize: isOuch ? "10px" : "12px",
       color: "#fff0bf",
       stroke: "#241508",
       strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(DEPTH.ui);
-    this.damageMeterObjects.push(title);
+      }
+    ).setOrigin(0.5).setDepth(DEPTH.ui);
+    this.damageMeterStatusText = this.add.text(
+      isOuch ? railX : centerX,
+      isOuch ? railTop + railHeight + 17 : bottom + 151,
+      "",
+      {
+        fontFamily: "Arial Black, Arial",
+        fontSize: isOuch ? "8px" : "9px",
+        color: "#ffe7a6",
+        stroke: "#241508",
+        strokeThickness: 2,
+      }
+    ).setOrigin(0.5).setDepth(DEPTH.ui + 1).setVisible(false);
+    this.damageMeterObjects.push(this.damageMeterTitle, this.damageMeterStatusText);
 
     values.forEach((value, index) => {
       const slot = this.damageMeterSlots[index];
       const activeColor = getMultiplierSegmentColor(index, values.length);
-      const marker = this.add.rectangle(slot.x, slot.y, segmentWidth, 24, 0x111923, 0.94)
+      const marker = this.add.rectangle(slot.x, slot.y, segmentWidth, segmentHeight, 0x111923, 0.94)
         .setStrokeStyle(2, activeColor, 0.74)
         .setDepth(DEPTH.ui);
       const label = this.add.text(slot.x, slot.y, `${value}x`, {
         fontFamily: "Arial Black, Arial",
-        fontSize: values.length > 12 ? "8px" : "10px",
+        fontSize: isOuch ? "8px" : (values.length > 12 ? "8px" : "10px"),
         color: "#ffffff",
         stroke: "#161a20",
         strokeThickness: 2,
       }).setOrigin(0.5).setDepth(DEPTH.ui);
-      this.damageMeterEntries.push({ value, marker, label, activeColor });
-      this.damageMeterObjects.push(marker, label);
+      const bankedStamp = this.add.text(slot.x, slot.y, "BANKED", {
+        fontFamily: "Arial Black, Arial",
+        fontSize: isOuch ? "5px" : "6px",
+        color: "#241508",
+        stroke: "#ffe5a0",
+        strokeThickness: 1,
+      }).setOrigin(0.5).setDepth(DEPTH.ui + 1).setVisible(false);
+      this.damageMeterEntries.push({ value, marker, label, bankedStamp, activeColor });
+      this.damageMeterObjects.push(marker, label, bankedStamp);
     });
 
     this.applyDamageMeterHighlight();
-    this.damageMeterObjects.forEach((object) => object.setVisible(this.isInBonusMode));
+    this.damageMeterObjects.forEach((object) => object.setVisible(this.isInBonusMode || this.isPostBonusOuch));
   }
 
   getDamageMeterActiveIndex(damageWheel = {}) {
@@ -523,8 +571,10 @@ export class GameScene extends Phaser.Scene {
   applyDamageMeterHighlight(activeIndex = 0) {
     this.damageMeterActiveIndex = activeIndex;
     this.damageMeterHighlightIndex = activeIndex;
+    const bankedCount = Math.min(this.damageMeterBankedCount || 0, this.damageMeterEntries.length);
     this.damageMeterEntries.forEach((entry, index) => {
       const isPassed = index < activeIndex;
+      const isBanked = index < bankedCount;
       const isActive = index === activeIndex;
       const isNext = index === activeIndex + 1;
       let fillColor;
@@ -536,14 +586,23 @@ export class GameScene extends Phaser.Scene {
       let labelAlpha;
       let labelScale;
 
-      if (isPassed) {
-        fillColor = blendMultiplierColor(entry.activeColor, 0.44);
-        fillAlpha = 0.78;
+      if (isPassed && isBanked) {
+        fillColor = 0xe5a62d;
+        fillAlpha = 0.96;
+        strokeColor = 0xfff1a8;
+        strokeWidth = 2;
+        strokeAlpha = 0.98;
+        markerAlpha = 1;
+        labelAlpha = 0.96;
+        labelScale = 0.9;
+      } else if (isPassed) {
+        fillColor = blendMultiplierColor(entry.activeColor, 0.5);
+        fillAlpha = 0.82;
         strokeColor = entry.activeColor;
         strokeWidth = 1;
-        strokeAlpha = 0.42;
-        markerAlpha = 0.82;
-        labelAlpha = 0.56;
+        strokeAlpha = 0.52;
+        markerAlpha = 0.86;
+        labelAlpha = 0.66;
         labelScale = 0.94;
       } else if (isActive) {
         fillColor = entry.activeColor;
@@ -581,8 +640,28 @@ export class GameScene extends Phaser.Scene {
       entry.label
         ?.setAlpha(labelAlpha)
         .setScale(labelScale);
+      entry.bankedStamp
+        ?.setVisible(isBanked && isPassed && (this.isBonusUiVisible || this.isPostBonusOuch))
+        .setAlpha(isBanked ? 0.95 : 0);
     });
     this.refreshTrapPowerDisplay();
+  }
+
+  setDamageMeterBankedCount(count = 0) {
+    this.damageMeterBankedCount = Phaser.Math.Clamp(
+      Math.floor(Number(count) || 0),
+      0,
+      this.damageMeterEntries.length
+    );
+    this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+  }
+
+  setDamageMeterStatus(text = "", color = "#ffe7a6") {
+    if (!this.damageMeterStatusText) return;
+    this.damageMeterStatusText
+      .setText(text)
+      .setColor(color)
+      .setVisible(Boolean(text) && (this.isBonusUiVisible || this.isPostBonusOuch));
   }
 
   async pulseDamageMeterHighlight(activeIndex = 0, { fast = false } = {}) {
@@ -603,13 +682,12 @@ export class GameScene extends Phaser.Scene {
 
   layoutDamageMeter() {
     this.layoutDamageMeterChrome();
-    const yOffset = this.getOuchUiYOffset();
     this.damageMeterEntries.forEach((entry, index) => {
       const slot = this.damageMeterSlots[index];
       if (!slot) return;
-      const slotY = slot.y + yOffset;
-      entry.marker?.setPosition(slot.x, slotY);
-      entry.label?.setPosition(slot.x, slotY);
+      entry.marker?.setPosition(slot.x, slot.y);
+      entry.label?.setPosition(slot.x, slot.y);
+      entry.bankedStamp?.setPosition(slot.x, slot.y);
     });
     this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
   }
@@ -964,11 +1042,18 @@ export class GameScene extends Phaser.Scene {
   layoutDamageMeterChrome() {
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
     const bottom = GRID_OFFSET_Y + GRID_HEIGHT_PX;
-    const yOffset = this.getOuchUiYOffset();
-    const panel = this.damageMeterObjects?.[0];
-    const title = this.damageMeterObjects?.[1];
-    panel?.setPosition(centerX, bottom + 129 + yOffset);
-    title?.setPosition(centerX, bottom + 111 + yOffset);
+    if (this.damageMeterOrientation === "ouch") {
+      const railHeight = GRID_HEIGHT_PX - 28;
+      const railX = GRID_OFFSET_X + 48;
+      const railTop = GRID_OFFSET_Y + 14 + OUCH_UI_OFFSET_Y;
+      this.damageMeterPanel?.setPosition(railX, railTop + railHeight / 2);
+      this.damageMeterTitle?.setPosition(railX, railTop - 16);
+      this.damageMeterStatusText?.setPosition(railX, railTop + railHeight + 17);
+      return;
+    }
+    this.damageMeterPanel?.setPosition(centerX, bottom + 129);
+    this.damageMeterTitle?.setPosition(centerX, bottom + 111);
+    this.damageMeterStatusText?.setPosition(centerX, bottom + 151);
   }
 
   layoutOuchHud() {
@@ -2302,6 +2387,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (fast) {
+      this.setDamageMeterStatus("BANKED STOMP", "#ffe7a6");
       const accentTargets = [activeEntry.marker, activeEntry.label].filter(Boolean);
       await Promise.all(accentTargets.map((target) => this.tweenPromise({
         targets: target,
@@ -2317,27 +2403,32 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    const isContinuation = stepNumber > 1;
     const chargeMs = Math.max(
-      stepNumber > 1 ? 480 : 260,
-      Math.min(Math.max(0, Number(leadInMs) || 0), 900)
+      isContinuation ? 720 : 420,
+      Math.max(0, Number(leadInMs) || 0)
     );
-    const pulses = stepNumber > 1 ? [120, 92, 68, 50] : [108, 78, 58];
-    const pulseBudget = pulses.reduce((sum, value) => sum + value, 0);
-    const introWait = Math.max(0, chargeMs - pulseBudget);
+    const pulseCount = isContinuation ? 5 : 3;
+    const introWait = Math.round(chargeMs * (isContinuation ? 0.34 : 0.22));
+    const pulseMs = Math.max(72, Math.round((chargeMs - introWait) / pulseCount));
+    this.setDamageMeterStatus(
+      isContinuation ? "WILL IT GO DEEPER?" : "FIRST STOMP • GUARANTEED",
+      isContinuation ? "#ffd166" : "#b6ffce"
+    );
     if (introWait > 0) {
       await this.waitForPresentation(introWait, { skippable: true });
     }
 
     const accentTargets = [activeEntry.marker, activeEntry.label].filter(Boolean);
-    for (let index = 0; index < pulses.length; index += 1) {
-      const pulseMs = pulses[index];
+    for (let index = 0; index < pulseCount; index += 1) {
+      const pulseScale = 1.05 + index * (isContinuation ? 0.035 : 0.025);
       await Promise.all([
         ...accentTargets.map((target) => this.tweenPromise({
           targets: target,
-          alpha: 0.32,
-          scaleX: target.scaleX * (1.06 + index * 0.03),
-          scaleY: target.scaleY * (1.06 + index * 0.03),
-          duration: Math.max(48, Math.round(pulseMs / 2)),
+          alpha: 0.24,
+          scaleX: target.scaleX * pulseScale,
+          scaleY: target.scaleY * pulseScale,
+          duration: Math.max(42, Math.round(pulseMs / 2)),
           yoyo: true,
           ease: "Sine.easeInOut",
           onComplete: () => {
@@ -2346,21 +2437,162 @@ export class GameScene extends Phaser.Scene {
         })),
         this.tweenPromise({
           targets: this.countUpText,
-          alpha: 0.72,
+          alpha: 0.66,
           duration: Math.max(42, Math.round(pulseMs / 2)),
           yoyo: true,
           ease: "Sine.easeInOut",
           onComplete: () => this.countUpText?.setAlpha(1),
         }),
       ]);
-      const isFinalPulse = index === pulses.length - 1;
-      if (isFinalPulse && stepNumber > 1) {
-        this.cameras.main.shake(70, 0.0018);
+      const isFinalPulse = index === pulseCount - 1;
+      if (isFinalPulse && isContinuation) {
+        this.cameras.main.shake(82, 0.0022);
       } else if (isFinalPulse) {
-        this.cameras.main.shake(45, 0.0012);
+        this.cameras.main.shake(52, 0.0014);
       }
       this.applyDamageMeterHighlight(activeIndex);
     }
+  }
+
+  spawnOuchDrawSuccessStars(entry) {
+    if (!entry?.marker) return Promise.resolve();
+    const colors = [0xffffff, 0xffdf70, 0xd8ff9b, 0xffb347];
+    const stars = Array.from({ length: 10 }, (_, index) => {
+      const star = this.add.star(
+        entry.marker.x + Phaser.Math.Between(-18, 18),
+        entry.marker.y + Phaser.Math.Between(-5, 5),
+        4,
+        Phaser.Math.Between(2, 3),
+        Phaser.Math.Between(5, 8),
+        colors[index % colors.length],
+        1
+      )
+        .setDepth(DEPTH.ui + 3)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const angle = Phaser.Math.DegToRad(-165 + index * 33);
+      return this.tweenPromise({
+        targets: star,
+        x: star.x + Math.cos(angle) * Phaser.Math.Between(18, 42),
+        y: star.y + Math.sin(angle) * Phaser.Math.Between(14, 38),
+        scaleX: Phaser.Math.FloatBetween(1.25, 2),
+        scaleY: Phaser.Math.FloatBetween(1.25, 2),
+        alpha: 0,
+        angle: Phaser.Math.Between(-80, 80),
+        delay: index * 14,
+        duration: Phaser.Math.Between(190, 300),
+        ease: "Quad.easeOut",
+        onComplete: () => star.destroy(),
+      });
+    });
+    return Promise.all(stars);
+  }
+
+  spawnOuchDepthArrows(entry) {
+    if (!entry?.marker) return Promise.resolve();
+    const railTop = GRID_OFFSET_Y + 14 + OUCH_UI_OFFSET_Y;
+    const targetY = entry.marker.y - entry.marker.height * 0.55;
+    const startY = Math.max(railTop - 4, targetY - 28);
+    const arrows = Array.from({ length: 3 }, (_, index) => {
+      const arrow = this.add.text(entry.marker.x, startY - index * 7, "▼", {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "14px",
+        color: "#fff4a8",
+        stroke: "#5d3b0c",
+        strokeThickness: 2,
+      })
+        .setOrigin(0.5)
+        .setDepth(DEPTH.ui + 3)
+        .setAlpha(0);
+      return this.tweenPromise({
+        targets: arrow,
+        y: targetY + 5,
+        alpha: 1,
+        scaleX: 1.12,
+        scaleY: 1.12,
+        delay: index * 54,
+        duration: 150,
+        ease: "Quad.easeIn",
+      }).then(() => this.tweenPromise({
+        targets: arrow,
+        alpha: 0,
+        y: targetY + 13,
+        duration: 90,
+        ease: "Quad.easeOut",
+        onComplete: () => arrow.destroy(),
+      }));
+    });
+    return Promise.all(arrows);
+  }
+
+  async presentOuchDrawSuccess(activeIndex = this.damageMeterActiveIndex ?? 0) {
+    const entry = this.damageMeterEntries[activeIndex];
+    if (!entry) return;
+    const multiplier = Number(entry.value) || 1;
+    this.setDamageMeterStatus(`DEEPER! • ${multiplier}x`, "#f8ffbd");
+    if (this.fastForwardRequested) {
+      this.applyDamageMeterHighlight(activeIndex);
+      return;
+    }
+
+    entry.marker
+      ?.setFillStyle(0xffffff, 1)
+      .setStrokeStyle(3, 0xffee8a, 1)
+      .setAlpha(1);
+    entry.label?.setColor("#1b2a18").setAlpha(1).setScale(1.16);
+    this.playSfx("wins_explode", { volume: 0.56 });
+    await Promise.all([
+      this.tweenPromise({
+        targets: entry.marker,
+        scaleX: entry.marker.scaleX * 1.22,
+        scaleY: entry.marker.scaleY * 1.22,
+        duration: 105,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }),
+      this.tweenPromise({
+        targets: entry.label,
+        scaleX: entry.label.scaleX * 1.18,
+        scaleY: entry.label.scaleY * 1.18,
+        duration: 105,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }),
+      this.spawnOuchDrawSuccessStars(entry),
+      this.spawnOuchDepthArrows(entry),
+    ]);
+    this.applyDamageMeterHighlight(activeIndex);
+  }
+
+  async presentOuchStompStopReveal(finalIndex = 0) {
+    const nextEntry = this.damageMeterEntries[finalIndex + 1];
+    if (!nextEntry) return false;
+    this.setDamageMeterStatus("STOMP STOPS", "#ff8585");
+    nextEntry.marker
+      ?.setFillStyle(0x5e1118, 0.98)
+      .setStrokeStyle(3, 0xff505f, 1)
+      .setAlpha(1);
+    nextEntry.label?.setColor("#ffe2e5").setAlpha(1).setScale(1.14);
+    this.cameras.main.shake(130, 0.006);
+    await Promise.all([nextEntry.marker, nextEntry.label].filter(Boolean).map((target) => this.tweenPromise({
+      targets: target,
+      scaleX: target.scaleX * 1.16,
+      scaleY: target.scaleY * 1.16,
+      duration: 130,
+      yoyo: true,
+      repeat: 1,
+      ease: "Quad.easeOut",
+    })));
+    await this.waitForPresentation(340, { skippable: true });
+    return true;
+  }
+
+  async presentOuchMaxDepthReveal() {
+    const lastEntry = this.damageMeterEntries[this.damageMeterEntries.length - 1];
+    if (!lastEntry) return;
+    this.setDamageMeterStatus("MAX DEPTH!", "#fff0a8");
+    await this.pulseDamageMeterHighlight(this.damageMeterEntries.length - 1);
+    this.cameras.main.shake(120, 0.004);
+    await this.waitForPresentation(280, { skippable: true });
   }
 
   async spawnCelebrationCoinBurst(centerX, centerY, count = 12) {
@@ -2699,16 +2931,18 @@ export class GameScene extends Phaser.Scene {
     const centerY = (impact?.impactY || GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.55) + CELL_SIZE * 0.1;
 
     if (stepNumber > 1) {
-      await this.presentOuchDamageMeterCharge(stepNumber, stepIntervalMs);
       await this.advanceDamageMeterForOuchStep();
+      await this.presentOuchDamageMeterCharge(stepNumber, stepIntervalMs);
+      await this.presentOuchDrawSuccess(this.damageMeterActiveIndex ?? 0);
       await this.presentOuchFootPushDown(impact);
-      this.playSfx("wins_explode", { volume: 0.48 });
       await this.pulseDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     } else {
       await this.presentOuchDamageMeterCharge(stepNumber, 260);
-      await this.pulseDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+      await this.presentOuchDrawSuccess(this.damageMeterActiveIndex ?? 0);
     }
 
+    const activeMultiplier = Number(this.damageMeterEntries[this.damageMeterActiveIndex]?.value) || 1;
+    this.setDamageMeterStatus(`DEEPER • ${activeMultiplier}x`, "#d8ffba");
     this.spawnOuchPainEffects(centerX, centerY, 1 + (stepNumber - 1) * 0.35);
     await this.scrollOuchPit();
     const coinLaunch = this.spawnOuchWinCoins(centerX, centerY, coinCount, winAmount);
@@ -2738,6 +2972,7 @@ export class GameScene extends Phaser.Scene {
       segments: meterSegments,
       remainingSegments: damageWheel.remainingSegments || damageWheel.segments || DEFAULT_DAMAGE_METER_SEGMENTS,
     });
+    this.setDamageMeterBankedCount(catchUpIndex);
     this.updateTrapPowerMeter(ouchEvent.trapPower || gameState.trapMeter?.power || 0);
     this.setOuchUiVisible(true);
     this.currentWin = 0;
@@ -2748,12 +2983,26 @@ export class GameScene extends Phaser.Scene {
     const impact = await this.presentOuchStompImpact(bounds);
     if (!impact) return;
 
+    if (catchUpIndex > 0) {
+      const bankedLabel = catchUpIndex === 1 ? "1 BANKED STOMP" : `${catchUpIndex} BANKED STOMPS`;
+      this.setDamageMeterStatus(bankedLabel, "#ffe7a6");
+    }
     await this.presentOuchPassedMultiplierReplay(catchUpIndex, impact, ouchEvent, gameState.betSize);
+    const firstLiveEntry = this.damageMeterEntries[this.damageMeterActiveIndex];
+    if (firstLiveEntry) {
+      this.setDamageMeterStatus(`NEXT STOMP • ${firstLiveEntry.value}x`, "#b6ffce");
+    }
 
     for (const step of ouchEvent.steps) {
       await this.presentOuchStompStep(step, ouchEvent, impact);
     }
 
+    const finalIndex = this.damageMeterActiveIndex ?? 0;
+    if (finalIndex >= this.damageMeterEntries.length - 1) {
+      await this.presentOuchMaxDepthReveal();
+    } else {
+      await this.presentOuchStompStopReveal(finalIndex);
+    }
     await this.waitForPresentation(220, { skippable: true });
     await this.presentOuchLegPullExit(impact);
     const cappedTotal = this.clampToWinCap(
@@ -3407,6 +3656,10 @@ export class GameScene extends Phaser.Scene {
     this.isBonusUiVisible = visible === true;
     this.bonusUi?.forEach((item) => item?.setVisible(visible));
     this.damageMeterObjects?.forEach((item) => item?.setVisible(visible));
+    if (visible) {
+      this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+      this.damageMeterStatusText?.setVisible(Boolean(this.damageMeterStatusText?.text));
+    }
     this.freespinText?.setVisible(false);
     this.setAngerUiVisible(!visible && !this.isInBonusMode && !this.isPostBonusOuch);
   }
@@ -3421,6 +3674,8 @@ export class GameScene extends Phaser.Scene {
     this.setBonusUiVisible(false);
     this.setAngerUiVisible(false);
     this.damageMeterObjects?.forEach((item) => item?.setVisible(visible));
+    this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+    this.damageMeterStatusText?.setVisible(visible && Boolean(this.damageMeterStatusText?.text));
     this.trapPowerText?.setVisible(visible);
     this.trapPowerMultiplierText?.setVisible(visible && Boolean(this.trapPowerMultiplierText?.text));
     this.countUpText?.setVisible(visible);
@@ -3590,11 +3845,20 @@ export class GameScene extends Phaser.Scene {
     const remaining = Array.isArray(damageWheel?.remainingSegments)
       ? damageWheel.remainingSegments.map(Number)
       : segments;
-    if (segments.join(",") !== (this.damageMeterValues || []).join(",")) {
+    const expectedOrientation = this.isPostBonusOuch ? "ouch" : "bonus";
+    if (
+      segments.join(",") !== (this.damageMeterValues || []).join(",")
+      || this.damageMeterOrientation !== expectedOrientation
+    ) {
       this.createDamageMeter(segments);
     }
     const activeIndex = this.getDamageMeterActiveIndex({ segments, remainingSegments: remaining });
     this.layoutDamageMeter();
+    if (!this.isPostBonusOuch) {
+      this.damageMeterBankedCount = activeIndex;
+      const bankedLabel = activeIndex === 1 ? "1 BANKED STOMP" : `${activeIndex} BANKED STOMPS`;
+      this.setDamageMeterStatus(activeIndex > 0 ? bankedLabel : "", "#ffe7a6");
+    }
     this.applyDamageMeterHighlight(activeIndex);
     this.damageMeterState = {
       segments,

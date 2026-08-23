@@ -49,12 +49,14 @@ Triggered from `Client.reactOnResponse` when bonus ends (`nextAction === "spin"`
 1. `presentBonusExitSequence(gameState)` crossfades to `ouch_background`, fake doll spin.
 2. `presentOuchStompSequence(ouchStompEvent)`:
    - **Impact:** foot slams trap, `spawnOuchDebrisBurst`, random `ouch_stomp1/2`, start `ouch_background-music`.
-   - **Passed replay:** after impact, bonus-advanced multiplier segments replay as fast lift-and-slam stomps with decorative gold coins (no win credit).
+   - **Banked replay:** bonus-advanced multiplier segments are gold `BANKED` stomps. They replay as fast lift-and-slam stomps with decorative gold coins (no win credit) before any risky step.
    - **Per step:** scroll pit up, advance multiplier highlight, foot pushes deeper (no lift wobble), coins → count-up ticks to `step.winAmount`.
-   - **Step 2+:** wait `stepIntervalMs`, random pain scream + gore SFX, heavy blood/gibs before meter shift.
+   - **Step 2+:** the next multiplier tile charges for the full `stepIntervalMs` before revealing the deeper stomp; random pain scream + gore SFX then play on success.
+   - **Success cue:** the target tile makes a bright confirmation swap, launches star particles, and receives short downward arrows before the foot moves deeper.
+   - **Terminal reveal:** when unvisited segments remain after the final resolved step, the next tile flashes red with `STOMP STOPS`; reaching the final segment instead shows `MAX DEPTH`.
    - **Exit:** when multiplier stops advancing, foot partially pulls out with blood pour + stacked pain screams, fade to black, then fade into total-win scene.
 3. `leaveBonus()` on next paid spin resets scroll offset and stops ouch theme.
 
-UI during ouch: damage meter + trap power readout + count-up (`setOuchUiVisible`).
+UI: bonus uses the horizontal multiplier strip. Ouch rebuilds the same segment style as a vertical `STOMP DEPTH` rail on the left side of the pit, ordered from the low multiplier at the top to the high multiplier at the bottom. Gold banked steps remain distinct from normal completed and risky steps.
 
 Assets: `src/game-client/assets/giantstomp/sounds/ouch_*`, `giant_pain_scream*`.
