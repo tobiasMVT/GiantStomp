@@ -64,8 +64,11 @@ export function queueGameSceneAssets(load, _deps = {}) {
   load.image("crush_giant_bg", "assets/giantstomp/giant_in_bg.png");
   load.image("reel_frame", "assets/giantstomp/reel_frame.png");
   load.image("bonus_background", "assets/giantstomp/background_bonus.png");
+  load.image("bonus_torch_height", "assets/giantstomp/bonus_torch_effect/background_bonus_height.png");
+  load.image("bonus_torch_normal", "assets/giantstomp/bonus_torch_effect/background_bonus_normal_opengl.png");
   load.image("ouch_background", "assets/giantstomp/ouch_background.png");
   load.image("total_win_background", "assets/giantstomp/stompy_background_totalwin.png");
+  load.glsl("bonus_hole_light", "assets/shaders/bonus_hole_light.glsl");
 
   load.audio("action_spin_click", "assets/sounds/action_spin_click.opus");
   load.audio("wins_highlight", "assets/sounds/wins_highlight.opus");

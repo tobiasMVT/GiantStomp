@@ -38,6 +38,8 @@ const BONUS_INTRO_SCALE = 1.06;
 const BONUS_INTRO_DRIFT_X = 22;
 const BONUS_INTRO_DRIFT_Y = -18;
 const BONUS_INTRO_HOLD_MS = 1500;
+const BONUS_HOLE_LIGHT_CENTER_OFFSET_X = 0;
+const BONUS_HOLE_LIGHT_CENTER_OFFSET_Y = 68;
 const BONUS_INTRO_SPARKLES = [
   { x: -214, y: 20, radius: 8, color: 0xffcc73 },
   { x: -126, y: 50, radius: 6, color: 0x7dd3fc },
@@ -212,6 +214,10 @@ export class GameScene extends Phaser.Scene {
     this.bonusIntroSunGlow = null;
     this.bonusIntroBlueprintGlow = null;
     this.bonusIntroSparkles = [];
+    this.bonusHoleLightShader = null;
+    this.bonusHoleLightFadeState = { value: 0 };
+    this.bonusHoleLightPulseState = { value: 0 };
+    this.bonusHoleLightPulseTween = null;
     this.bonusUi = [];
     this.lifeSegments = [];
     this.trapPowerText = null;
@@ -251,6 +257,7 @@ export class GameScene extends Phaser.Scene {
     this.unsubscribeLayout?.();
     this.unsubscribeLayoutDebug?.();
     this.cancelSkippablePresentationWaits();
+    this.stopBonusHoleLightFlicker();
     this.finishActiveTweens();
   }
 
@@ -274,6 +281,7 @@ export class GameScene extends Phaser.Scene {
       this.layoutBackgroundImage(image);
     });
     this.layoutBackgroundImage(this.ouchBackground, OUCH_BACKGROUND_SCALE);
+    this.createBonusHoleLightFx();
     this.createBonusIntroScene();
     this.reelFrame = this.add.image(x, y, "reel_frame").setDepth(DEPTH.board);
     const reelFrameSource = this.reelFrame.texture.getSourceImage?.();
@@ -873,6 +881,7 @@ export class GameScene extends Phaser.Scene {
       this.layoutTotalWinTexts();
     }
     this.layoutBonusIntroScene();
+    this.layoutBonusHoleLightFx();
   }
 
   getTotalWinTextLayout() {
@@ -931,6 +940,128 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  getBonusHoleLightLayout() {
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2 + BONUS_HOLE_LIGHT_CENTER_OFFSET_X;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX + BONUS_HOLE_LIGHT_CENTER_OFFSET_Y;
+    const background = this.bonusBackground;
+    const displayWidth = Math.max(1, background?.displayWidth || (background?.width * background?.scaleX) || 1);
+    const displayHeight = Math.max(1, background?.displayHeight || (background?.height * background?.scaleY) || 1);
+    const left = (background?.x || centerX) - displayWidth / 2;
+    const top = (background?.y || centerY) - displayHeight / 2;
+    return {
+      centerX,
+      centerY,
+      uvX: Phaser.Math.Clamp((centerX - left) / displayWidth, 0.0, 1.0),
+      uvY: Phaser.Math.Clamp(1 - ((centerY - top) / displayHeight), 0.0, 1.0),
+    };
+  }
+
+  createBonusHoleLightFx() {
+    if (!this.add.shader || !this.cache?.shader?.has?.("bonus_hole_light")) return;
+    const frame = this.textures.getFrame("bonus_background");
+    if (!frame?.width || !frame?.height) return;
+    const shader = this.add.shader(
+      "bonus_hole_light",
+      this.bonusBackground.x,
+      this.bonusBackground.y,
+      frame.width,
+      frame.height,
+      ["bonus_torch_height", "bonus_torch_normal"],
+      { repeat: false }
+    );
+    shader
+      .setDepth(DEPTH.background + 0.5)
+      .setVisible(false);
+    this.bonusHoleLightShader = shader;
+    this.layoutBonusHoleLightFx();
+    this.resetBonusHoleLightFx();
+  }
+
+  layoutBonusHoleLightFx() {
+    if (!this.bonusHoleLightShader) return;
+    const layout = this.getBonusHoleLightLayout();
+    this.bonusHoleLightShader
+      .setPosition(this.bonusBackground.x, this.bonusBackground.y)
+      .setScale(this.bonusBackground.scaleX, this.bonusBackground.scaleY)
+      .setUniform("lightPos.value.x", layout.uvX)
+      .setUniform("lightPos.value.y", layout.uvY);
+  }
+
+  resetBonusHoleLightFx() {
+    this.bonusHoleLightFadeState.value = 0;
+    this.bonusHoleLightPulseState.value = 0;
+    if (!this.bonusHoleLightShader) return;
+    this.bonusHoleLightShader
+      .setUniform("sceneAlpha.value", 0)
+      .setUniform("flare.value", 0);
+  }
+
+  startBonusHoleLightFlicker() {
+    this.layoutBonusHoleLightFx();
+  }
+
+  stopBonusHoleLightFlicker() {
+    this.bonusHoleLightPulseTween?.remove?.();
+    this.bonusHoleLightPulseTween = null;
+    this.bonusHoleLightPulseState.value = 0;
+    this.bonusHoleLightShader?.setUniform("flare.value", 0);
+  }
+
+  setBonusHoleLightVisible(visible, { duration = 0 } = {}) {
+    if (!this.bonusHoleLightShader) return Promise.resolve();
+    if (visible) {
+      this.layoutBonusHoleLightFx();
+      this.bonusHoleLightShader.setVisible(true);
+      this.startBonusHoleLightFlicker();
+    } else {
+      this.stopBonusHoleLightFlicker();
+    }
+    const targetValue = visible ? 1 : 0;
+    if (!duration || !this.tweens) {
+      this.bonusHoleLightFadeState.value = targetValue;
+      this.bonusHoleLightShader
+        .setUniform("sceneAlpha.value", targetValue)
+        .setVisible(visible);
+      return Promise.resolve();
+    }
+    return this.tweenPromise({
+      targets: this.bonusHoleLightFadeState,
+      value: targetValue,
+      duration,
+      ease: "Quad.easeInOut",
+      onUpdate: () => {
+        this.bonusHoleLightShader?.setUniform("sceneAlpha.value", this.bonusHoleLightFadeState.value);
+      },
+      onComplete: () => {
+        this.bonusHoleLightShader?.setUniform("sceneAlpha.value", this.bonusHoleLightFadeState.value);
+        if (!visible) this.bonusHoleLightShader?.setVisible(false);
+      },
+    });
+  }
+
+  pulseBonusHoleLight({ strength = 1 } = {}) {
+    if (!this.bonusHoleLightShader?.visible || !this.tweens) return;
+    const normalizedStrength = Phaser.Math.Clamp(Number(strength) || 1, 0.65, 1.65);
+    this.bonusHoleLightPulseTween?.remove?.();
+    this.bonusHoleLightPulseState.value = 0;
+    this.bonusHoleLightShader.setUniform("flare.value", 0);
+    this.bonusHoleLightPulseTween = this.tweens.add({
+      targets: this.bonusHoleLightPulseState,
+      value: normalizedStrength,
+      duration: 180,
+      yoyo: true,
+      ease: "Sine.easeOut",
+      onUpdate: () => {
+        this.bonusHoleLightShader?.setUniform("flare.value", this.bonusHoleLightPulseState.value);
+      },
+      onComplete: () => {
+        this.bonusHoleLightPulseState.value = 0;
+        this.bonusHoleLightShader?.setUniform("flare.value", 0);
+        this.bonusHoleLightPulseTween = null;
+      },
+    });
+  }
+
   resetBonusIntroScene() {
     if (!this.bonusIntroImage) return;
     this.layoutBonusIntroScene();
@@ -960,6 +1091,7 @@ export class GameScene extends Phaser.Scene {
       await Promise.all([
         this.tweenPromise({ targets: this.background, alpha: 0, duration: 450 }),
         this.tweenPromise({ targets: this.bonusBackground, alpha: 1, duration: 450 }),
+        this.setBonusHoleLightVisible(true, { duration: 450 }),
         this.fadeMainGameSymbols(0, 450),
       ]);
       return;
@@ -1032,6 +1164,7 @@ export class GameScene extends Phaser.Scene {
     await Promise.all([
       this.tweenPromise({ targets: this.background, alpha: 0, duration: 420, ease: "Quad.easeInOut" }),
       this.tweenPromise({ targets: this.bonusBackground, alpha: 1, duration: 460, ease: "Quad.easeInOut" }),
+      this.setBonusHoleLightVisible(true, { duration: 460 }),
       this.tweenPromise({ targets: this.reelFrame, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
       this.tweenPromise({ targets: introImage, alpha: 0, duration: 380, ease: "Quad.easeInOut" }),
       this.tweenPromise({ targets: introFxTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
@@ -4107,6 +4240,7 @@ export class GameScene extends Phaser.Scene {
       },
       onComplete: () => clone.destroy(),
     });
+    this.pulseBonusHoleLight({ strength: 1.25 });
     await this.createCartoonDustCloud(anchor.x, anchor.y, { big: true });
     await this.presentTrapPowerIncrease(landing);
   }
@@ -4151,6 +4285,7 @@ export class GameScene extends Phaser.Scene {
       },
       onComplete: () => sprite.setVisible(false),
     });
+    this.pulseBonusHoleLight({ strength: 1 });
     await this.createCartoonDustCloud(anchor.x, anchor.y);
   }
 
@@ -4407,6 +4542,7 @@ export class GameScene extends Phaser.Scene {
     await this.slideOutOldSymbols();
     await Promise.all([
       this.tweenPromise({ targets: this.bonusBackground, alpha: 0, duration: 450 }),
+      this.setBonusHoleLightVisible(false, { duration: 450 }),
       this.tweenPromise({ targets: this.ouchBackground, alpha: 1, duration: 450 }),
     ]);
     await this.presentOuchFakeSpin();
@@ -4433,6 +4569,7 @@ export class GameScene extends Phaser.Scene {
     await Promise.all([
       this.tweenPromise({ targets: this.background, alpha: 1, duration: 300 }),
       this.tweenPromise({ targets: this.bonusBackground, alpha: 0, duration: 300 }),
+      this.setBonusHoleLightVisible(false, { duration: 300 }),
       this.tweenPromise({ targets: this.ouchBackground, alpha: 0, duration: 300 }),
       this.tweenPromise({ targets: this.totalWinBackground, alpha: 0, duration: 300 }),
       this.tweenPromise({ targets: this.reelFrame, alpha: 1, duration: 300 }),

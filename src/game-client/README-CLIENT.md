@@ -46,6 +46,8 @@ meter built from `life1`/`life2`/`life3`, large collectors for `666`/`777`/`888`
 an uncapped trap-power readout whose text heats from green through yellow to red, and
 a green/yellow/red segmented Multiplier whose segment count follows the server
 damage-wheel values.
+The hole area now renders through a depth and normal driven shader pass so the pit feels
+lit from below with warmer spill, beam haze, and sharper rim response during the bonus.
 
 A bonus spin darkens the spent life segment up front, so the meter never spoils the
 outcome. The first presented landing relights the meter to full and the flow waits for
