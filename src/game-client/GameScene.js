@@ -1376,6 +1376,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async spinBonusReels(reels) {
+    this.clearHighlights();
     const oldSprites = this.reelSprites.flat().filter(Boolean);
     this.reelSprites = Array.from({ length: REELS }, () => Array(ROWS).fill(null));
     const tweens = oldSprites.map((sprite, index) => this.tweenPromise({
@@ -4517,6 +4518,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async enterBonus(gameState = {}) {
+    this.clearHighlights();
     this.isInBonusMode = true;
     this.setAngerUiVisible(false);
     this.totalWinBackground?.setAlpha(0);
