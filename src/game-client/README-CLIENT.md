@@ -56,8 +56,11 @@ collector awards its value on the fourth light and then resets its own lights. E
 landed bonus item is pulled out of the masked reels and arced down into the wide hole
 area painted on the bonus background, which kicks up a heavy cartoon dust cloud before
 its trap, power, or multiplier state updates.
-Multiplier segments stay fixed in place; passed values keep their hue but render faded,
-while the active segment is fully lit. Symbol `1000` advances the meter one step. Trap
+Multiplier values are live text positioned on the ladder anchors, with no broad dimming
+mask. Passed and later values use readable muted bronze, the next value uses a clearer
+gold treatment, and the current value is repeated on the foot with a restrained text
+pulse. On bonus entry, a warm light ripple sweeps across the ladder from `100x` back to
+`1x`. Symbol `1000` advances the meter one step. Trap
 power is presentation state during bonus spins; it credits through the ouch stomp at
 bonus exit.
 

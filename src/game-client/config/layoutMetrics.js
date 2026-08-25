@@ -42,10 +42,14 @@ const OUCH_STOMP_OFFSET_X = 50;
 const OUCH_PIT_STEP_DELTA_Y = 88;
 const OUCH_UI_OFFSET_Y = 50;
 
-const layoutReelFrame = (image, source) => {
+const getReelFrameScale = (source) => {
   const innerW = source.width * REEL_FRAME_INNER_NORM.width;
   const innerH = source.height * REEL_FRAME_INNER_NORM.height;
-  const scale = Math.max(GRID_WIDTH_PX / innerW, GRID_HEIGHT_PX / innerH);
+  return Math.max(GRID_WIDTH_PX / innerW, GRID_HEIGHT_PX / innerH);
+};
+
+const layoutReelFrame = (image, source) => {
+  const scale = getReelFrameScale(source);
   image.setScale(scale);
 
   const innerCenterX = source.width * (REEL_FRAME_INNER_NORM.x + REEL_FRAME_INNER_NORM.width / 2);
@@ -54,6 +58,64 @@ const layoutReelFrame = (image, source) => {
     GRID_OFFSET_X + GRID_WIDTH_PX / 2 + (source.width / 2 - innerCenterX) * scale,
     GRID_OFFSET_Y + GRID_HEIGHT_PX / 2 + (source.height / 2 - innerCenterY) * scale + REEL_FRAME_OFFSET_Y
   );
+};
+
+// Bonus multiplier ladder art (1303×146) aligned to the number strip inset (1157px wide).
+const BONUS_METER_LADDER_SIZE = { width: 1303, height: 146 };
+const BONUS_METER_NUMBERS_INSET_NORM = 73 / BONUS_METER_LADDER_SIZE.width;
+const BONUS_METER_NUMBERS_WIDTH_NORM = 1157 / BONUS_METER_LADDER_SIZE.width;
+const BONUS_METER_NUMBERS_Y_NORM = 0.41;
+const BONUS_METER_NUMBERS_OFFSET_X = 7;
+const BONUS_METER_NUMBERS_OFFSET_Y = 6;
+const BONUS_METER_FOOT_Y_NORM = 0.74;
+const BONUS_METER_FOOT_OFFSET_Y = -3;
+const BONUS_METER_ANCHOR_Y = 129;
+// Per-slot anchor X on ladder width (0–1). Set 12 values when gaps are non-uniform; null keeps even spacing.
+const BONUS_METER_SLOT_NORM_X = null;
+// Pixel nudge per default slot: 1x, 2x, 3x, 4x, 5x, 10x, 15x, 20x, 25x, 50x, 75x, 100x
+const BONUS_METER_SLOT_OFFSET_X = [-6, -2, -1, 0, 0, 0, 3, 3, 3, 4, 3, 4];
+const BONUS_METER_SHOW_ANCHOR_DEBUG = false;
+
+const getBonusDamageMeterSlotNormX = (index, segmentCount) => {
+  if (
+    Array.isArray(BONUS_METER_SLOT_NORM_X)
+    && BONUS_METER_SLOT_NORM_X.length > index
+    && BONUS_METER_SLOT_NORM_X[index] != null
+  ) {
+    return BONUS_METER_SLOT_NORM_X[index];
+  }
+  return BONUS_METER_NUMBERS_INSET_NORM
+    + ((index + 0.5) / segmentCount) * BONUS_METER_NUMBERS_WIDTH_NORM;
+};
+
+const getBonusDamageMeterAnchor = () => ({
+  centerX: GRID_OFFSET_X + GRID_WIDTH_PX / 2,
+  centerY: GRID_OFFSET_Y + GRID_HEIGHT_PX + BONUS_METER_ANCHOR_Y,
+});
+
+const getBonusDamageMeterSlotPositions = (
+  segmentCount,
+  scale,
+  centerX,
+  centerY,
+  ladderSize = BONUS_METER_LADDER_SIZE
+) => {
+  const halfW = (ladderSize.width * scale) / 2;
+  const topY = centerY - (ladderSize.height * scale) / 2;
+  const leftX = centerX - halfW;
+  return Array.from({ length: segmentCount }, (_, index) => {
+    const normX = getBonusDamageMeterSlotNormX(index, segmentCount);
+    const slotOffsetX = BONUS_METER_SLOT_OFFSET_X[index] ?? 0;
+    const x = leftX + normX * ladderSize.width * scale + BONUS_METER_NUMBERS_OFFSET_X + slotOffsetX;
+    const numberY = topY + BONUS_METER_NUMBERS_Y_NORM * ladderSize.height * scale + BONUS_METER_NUMBERS_OFFSET_Y;
+    const footY = topY + BONUS_METER_FOOT_Y_NORM * ladderSize.height * scale + BONUS_METER_FOOT_OFFSET_Y;
+    return { x, y: numberY, numberY, footY };
+  });
+};
+
+const layoutBonusDamageMeterLadder = (image, scale) => {
+  const { centerX, centerY } = getBonusDamageMeterAnchor();
+  image.setScale(scale).setPosition(centerX, centerY);
 };
 
 export {
@@ -73,6 +135,18 @@ export {
   getCountUpAnchor,
   getGridBottomY,
   layoutReelFrame,
+  getReelFrameScale,
+  BONUS_METER_LADDER_SIZE,
+  getBonusDamageMeterAnchor,
+  getBonusDamageMeterSlotPositions,
+  layoutBonusDamageMeterLadder,
+  BONUS_METER_NUMBERS_OFFSET_X,
+  BONUS_METER_NUMBERS_OFFSET_Y,
+  BONUS_METER_FOOT_OFFSET_Y,
+  BONUS_METER_SLOT_NORM_X,
+  BONUS_METER_SLOT_OFFSET_X,
+  BONUS_METER_SHOW_ANCHOR_DEBUG,
+  getBonusDamageMeterSlotNormX,
   BONUS_BACKGROUND_OFFSET_Y,
   OUCH_BACKGROUND_OFFSET_Y,
   OUCH_BACKGROUND_SCALE,
