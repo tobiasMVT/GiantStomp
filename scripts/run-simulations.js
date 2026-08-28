@@ -259,16 +259,22 @@ const printWinDistribution = (title, distribution) => {
     12,
     ...distribution.buckets.map((bucket) => bucket.label.length)
   );
+  const includesConditionalMultiplier = distribution.buckets.some(
+    (bucket) => Object.hasOwn(bucket, "averageFinalMultiplier")
+  );
   console.log(`\n${title} (n=${distribution.sampleCount})`);
   console.log(
-    `  ${"".padEnd(labelWidth)} ${"count".padStart(8)}  ${"in".padStart(7)}%  ${">=".padStart(7)}%  frequency`
+    `  ${"".padEnd(labelWidth)} ${"count".padStart(8)}  ${"in".padStart(7)}%  ${">=".padStart(7)}%  frequency${includesConditionalMultiplier ? "  avg mult" : ""}`
   );
   for (const bucket of distribution.buckets) {
     const atOrAbove = bucket.percentAtOrAbove === null
       ? "    n/a"
       : String(bucket.percentAtOrAbove).padStart(7);
+    const conditionalMultiplier = includesConditionalMultiplier
+      ? `  ${bucket.averageFinalMultiplier === null ? "n/a" : `${bucket.averageFinalMultiplier}x`.padStart(8)}`
+      : "";
     console.log(
-      `  ${bucket.label.padEnd(labelWidth)} ${String(bucket.count).padStart(8)}  ${String(bucket.percent).padStart(7)}%  ${atOrAbove}%  ${bucket.frequency}`
+      `  ${bucket.label.padEnd(labelWidth)} ${String(bucket.count).padStart(8)}  ${String(bucket.percent).padStart(7)}%  ${atOrAbove}%  ${bucket.frequency}${conditionalMultiplier}`
     );
   }
   if (distribution.unmatched > 0) {
@@ -528,12 +534,33 @@ const bonusWinDistribution = buildWinDistribution(
 );
 
 const averageTrapPower = bonusRounds > 0 ? totalTrapPower / bonusRounds : 0;
+const averageFinalMultiplier = bonusRounds > 0
+  ? finalMultiplierPerBonusRound.reduce((sum, multiplier) => sum + (Number(multiplier) || 0), 0) / bonusRounds
+  : 0;
 
 const trapPowerDistribution = buildWinDistribution(
   trapPowerPerBonusRound,
   TRAP_POWER_BUCKETS,
   bonusRounds
 );
+
+for (const bucket of trapPowerDistribution.buckets) {
+  const bucketDefinition = TRAP_POWER_BUCKETS.find(({ label }) => label === bucket.label);
+  let multiplierTotal = 0;
+  let multiplierSamples = 0;
+
+  for (let index = 0; index < trapPowerPerBonusRound.length; index += 1) {
+    if (!bucketDefinition?.test(Number(trapPowerPerBonusRound[index]) || 0)) continue;
+    const multiplier = Number(finalMultiplierPerBonusRound[index]);
+    if (!Number.isFinite(multiplier)) continue;
+    multiplierTotal += multiplier;
+    multiplierSamples += 1;
+  }
+
+  bucket.averageFinalMultiplier = multiplierSamples > 0
+    ? Number((multiplierTotal / multiplierSamples).toFixed(6))
+    : null;
+}
 
 const finalMultiplierDistribution = buildWinDistribution(
   finalMultiplierPerBonusRound,
@@ -609,13 +636,14 @@ const report = {
       average: Number(averageTrapPower.toFixed(6)),
       max: Number(maxTrapPower.toFixed(6)),
       distribution: {
-        description: "1-wide buckets from 0 to <20, then 20-wide to <400, then 400+.",
+        description: "1-wide buckets from 0 to <20, then 20-wide to <400, then 400+. Each bucket includes the average final multiplier for bonus rounds in that trap-power range.",
         ...trapPowerDistribution,
       },
     },
     finalMultiplier: {
       description: "ouchStompEvent.finalMultiplier — last damage-wheel segment consumed. Bonus rounds only.",
       configuredValues: FINAL_MULTIPLIER_VALUES,
+      average: Number(averageFinalMultiplier.toFixed(6)),
       distribution: finalMultiplierDistribution,
     },
   },
@@ -671,6 +699,7 @@ console.log(`Main game RTP:    ${report.mainGame.rtpPercent}%  (avg win ${report
 console.log(`Bonus RTP:        ${report.bonus.rtpPercent}%  (avg win ${report.bonus.averageWin})`);
 console.log(`Bonus frequency:  ${report.bonus.bonusFrequency} (${report.bonus.bonusRatePercent}%)`);
 console.log(`Avg trap power:   ${report.bonus.trapPower.average}  (max ${report.bonus.trapPower.max})`);
+console.log(`Avg final mult:   ${report.bonus.finalMultiplier.average}x`);
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);
 console.log(`Crush feature:    ${report.features.crushFeature.frequency} (${report.features.crushFeature.triggeredRounds} rounds)`);
 console.log(`Animals crushed:  ${report.features.animalsCrushed.total} total, ${report.features.animalsCrushed.averagePerRound} avg/round`);
@@ -680,7 +709,13 @@ console.log(`Main var/std:     ${report.mainGame.variance} / ${report.mainGame.s
 console.log(`Bonus var/std:    ${report.bonus.variance} / ${report.bonus.stdDev}`);
 printWinDistribution("Main game win distribution", report.mainGame.winDistribution);
 printWinDistribution("Bonus win distribution", report.bonus.winDistribution);
-printWinDistribution("Trap power distribution", report.bonus.trapPower.distribution);
-printWinDistribution("Final multiplier distribution", report.bonus.finalMultiplier.distribution);
+printWinDistribution(
+  `Trap power distribution (avg ${report.bonus.trapPower.average}, max ${report.bonus.trapPower.max})`,
+  report.bonus.trapPower.distribution
+);
+printWinDistribution(
+  `Final multiplier distribution (avg ${report.bonus.finalMultiplier.average}x)`,
+  report.bonus.finalMultiplier.distribution
+);
 console.log(`Output:           ${resolvedOutputPath}`);
 console.log("========================================\n");
