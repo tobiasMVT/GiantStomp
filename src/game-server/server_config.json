@@ -58,7 +58,7 @@
     "777": 20,
     "888": 16,
     "999": 15,
-    "1000": 50,
+    "1000": 5,
     "0": 0
   },
   "** amount of materials in bonus": "",
@@ -156,10 +156,6 @@
     "75": 0.88,
     "100": 0.95
   },
-
-
-
-
   "ouchStompFeature": {
     "stepIntervalMs": 1800,
     "maxCoinsPerStep": 20

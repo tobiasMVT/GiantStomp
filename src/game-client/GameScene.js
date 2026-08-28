@@ -25,6 +25,7 @@ import {
   OUCH_STOMP_OFFSET_X,
   OUCH_PIT_STEP_DELTA_Y,
   OUCH_UI_OFFSET_Y,
+  getOuchDamageMeterLadderLayout,
 } from "./config/layoutMetrics";
 
 const REELS = 5;
@@ -42,6 +43,7 @@ const CASH_BONUS_SYMBOLS = new Set([111, 222, 333, 444, 555]);
 const TRAP_SYMBOLS = [666, 777, 888, 999];
 const DAMAGE_SYMBOL = 1000;
 const DEFAULT_DAMAGE_METER_SEGMENTS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+const AUTHORED_OUCH_LADDER_SEGMENTS = [...DEFAULT_DAMAGE_METER_SEGMENTS];
 const BONUS_INTRO_SCALE = 1.06;
 const BONUS_INTRO_DRIFT_X = 22;
 const BONUS_INTRO_DRIFT_Y = -18;
@@ -138,6 +140,7 @@ const STOMP_COIN_SCALE_MAX = 0.15;
 const WIN_CAP = Math.max(0, Number(clientConfig.wincap) || 0);
 const SYMBOL_LAND_EASE = "Back.easeOut";
 const SYMBOL_LAND_EASE_PARAMS = [1.08];
+const OUCH_LAYOUT_TUNER_VALUES = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
 
 const getReel = (reels, reel) => reels?.[reel] ?? reels?.[String(reel)] ?? [];
 const getSymbol = (reels, reel, row) => getReel(reels, reel)?.[row] ?? null;
@@ -211,8 +214,14 @@ export class GameScene extends Phaser.Scene {
     this.isBonusUiVisible = false;
     this.isPostBonusOuch = false;
     this.ouchScrollY = 0;
+    this.ouchTrapPowerMultiplierIndex = null;
     this.ouchTheme = null;
     this.ouchFoot = null;
+    this.ouchGear = null;
+    this.ouchSnare = null;
+    this.ouchRope = null;
+    this.ouchTrapTension = 0;
+    this.ouchTrapImpact = null;
     this.ouchFadeOverlay = null;
     this.ouchCoinCollectQueue = null;
     this.musicMuted = false;
@@ -224,6 +233,10 @@ export class GameScene extends Phaser.Scene {
     this.stompCoinLaunchPromises = [];
     this.stompWinCapHandled = false;
     this.totalWinBackground = null;
+    this.totalWinFormulaText = null;
+    this.animalEmotion = "normal";
+    this.totalWinCelebrants = [];
+    this.totalWinCelebrationTimers = [];
     this.bonusIntroImage = null;
     this.bonusIntroShade = null;
     this.bonusIntroSunGlow = null;
@@ -235,15 +248,21 @@ export class GameScene extends Phaser.Scene {
     this.bonusHoleLightPulseTween = null;
     this.bonusUi = [];
     this.lifeSegments = [];
+    this.lifeLabels = [];
     this.trapPowerText = null;
     this.trapPowerMultiplierText = null;
+    this.trapPowerMultiplierPulse = null;
     this.trapLightGroups = {};
     this.trapMeterState = { progress: {}, required: 4, values: {}, power: 0 };
     this.angerBlinkTween = null;
+    this.angerBonusPulseTween = null;
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
     this.damageMeterSlots = [];
     this.damageMeterOrientation = "bonus";
+    this.damageMeterUsesOuchLadder = false;
+    this.damageMeterLadderLayout = null;
+    this.damageMeterLadderDisplayIndex = -1;
     this.damageMeterBankedCount = 0;
     this.damageMeterPanel = null;
     this.damageMeterTitle = null;
@@ -261,6 +280,8 @@ export class GameScene extends Phaser.Scene {
       removedSegments: [],
       remainingSegments: [...DEFAULT_DAMAGE_METER_SEGMENTS],
     };
+    this.ouchLayoutTuner = null;
+    this.ouchLayoutTunerKeyHandler = null;
   }
 
   create() {
@@ -272,6 +293,9 @@ export class GameScene extends Phaser.Scene {
     this.scale.on(Phaser.Scale.Events.RESIZE, this.applyLayoutSnapshot, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.emitLayoutContentBounds();
+    if (this.isOuchLayoutTunerRequested()) {
+      this.time.delayedCall(150, () => this.presentOuchLayoutTunerPreview());
+    }
   }
 
   shutdown() {
@@ -280,7 +304,280 @@ export class GameScene extends Phaser.Scene {
     this.unsubscribeLayoutDebug?.();
     this.cancelSkippablePresentationWaits();
     this.stopBonusHoleLightFlicker();
+    this.stopAngerBonusPulse();
     this.finishActiveTweens();
+    this.destroyOuchTrapRig();
+    this.destroyOuchLayoutTuner();
+    this.clearTotalWinCelebration();
+  }
+
+  isOuchLayoutTunerRequested() {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("ouchLayout") === "1";
+  }
+
+  presentOuchLayoutTunerPreview() {
+    if (this.ouchLayoutTuner || !this.isOuchLayoutTunerRequested()) return;
+    this.isInBonusMode = true;
+    this.isPostBonusOuch = true;
+    this.background?.setAlpha(0);
+    this.bonusBackground?.setAlpha(0);
+    this.ouchBackground?.setAlpha(1);
+    this.reelFrame?.setAlpha(0);
+    this.reelSprites.flat().forEach((sprite) => sprite?.setVisible(false));
+    this.setAngerUiVisible(false);
+    this.setBonusUiVisible(false);
+    this.setOuchUiVisible(false);
+    this.startOuchTheme();
+
+    const bounds = this.getOuchStompBounds();
+    if (!bounds) return;
+    const footWidth = bounds.width + CELL_SIZE * 0.95;
+    const footScale = footWidth / 420;
+    const impactY = bounds.centerY + CELL_SIZE * 0.08;
+    this.ouchFoot?.destroy();
+    this.ouchFoot = this.add.image(bounds.centerX, impactY, "ouch_snared_foot")
+      .setDepth(DEPTH.stomp)
+      .setScale(footScale * 1.04, footScale * 0.97)
+      .setAlpha(0.98);
+    this.ouchTrapImpact = { foot: this.ouchFoot, impactY, footWidth, footScale, bounds };
+    this.createOuchLayoutTuner();
+  }
+
+  createOuchLayoutTuner() {
+    const saved = this.readOuchLayoutTunerSettings();
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX * 0.18;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.7;
+    const settings = {
+      x: Number(saved?.x) || centerX,
+      y: Number(saved?.y) || centerY,
+      width: Phaser.Math.Clamp(Number(saved?.width) || 88, 30, 240),
+      stepGap: Phaser.Math.Clamp(Number(saved?.stepGap) || 52, 12, 120),
+      selectedStep: Phaser.Math.Clamp(Math.round(Number(saved?.selectedStep) || 0), 0, OUCH_LAYOUT_TUNER_VALUES.length - 1),
+      pullDistance: Phaser.Math.Clamp(Number(saved?.pullDistance) || 18, 2, 120),
+      cameraX: Number(saved?.cameraX) || 0,
+      cameraY: Number(saved?.cameraY) || 0,
+      cameraZoom: Phaser.Math.Clamp(Number(saved?.cameraZoom) || 1, 0.5, 2),
+      artX: Number(saved?.artX) || centerX,
+      artY: Number(saved?.artY) || centerY,
+      artWidth: Phaser.Math.Clamp(Number(saved?.artWidth) || 110, 30, 320),
+      artHeight: Phaser.Math.Clamp(Number(saved?.artHeight) || 670, 100, 1200),
+    };
+    const graphics = this.add.graphics().setDepth(DEPTH.ui + 20);
+    const artLadder = this.add.image(settings.artX, settings.artY, "ouch_damage_meter_ladder")
+      .setDisplaySize(settings.artWidth, settings.artHeight)
+      .setAlpha(0.8)
+      .setDepth(DEPTH.ui + 20)
+      .setInteractive({ draggable: true, useHandCursor: true });
+    const dragTarget = this.add.rectangle(settings.x, settings.y, settings.width + 52, settings.stepGap * 11 + 60, 0x00d9ff, 0.001)
+      .setDepth(DEPTH.ui + 18)
+      .setInteractive({ draggable: true, useHandCursor: true });
+    const marker = this.add.image(settings.x - settings.width / 2 - 24, settings.y, "ouch_damage_meter_foot")
+      .setScale(0.42)
+      .setDepth(DEPTH.ui + 22);
+    const panel = this.add.text(GRID_OFFSET_X + 4, GRID_OFFSET_Y + 4, "", {
+      fontFamily: "monospace",
+      fontSize: "11px",
+      color: "#d9fbff",
+      stroke: "#00141d",
+      strokeThickness: 3,
+      lineSpacing: 2,
+    }).setDepth(DEPTH.ui + 25).setOrigin(0, 0);
+    const camera = this.cameras.main;
+    this.ouchLayoutTuner = {
+      settings,
+      graphics,
+      artLadder,
+      dragTarget,
+      marker,
+      panel,
+      camera,
+      baseCameraScrollX: camera.scrollX,
+      baseCameraScrollY: camera.scrollY,
+      baseCameraZoom: camera.zoom,
+      previewFootY: this.ouchFoot?.y,
+    };
+    dragTarget.on("drag", (_pointer, dragX, dragY) => {
+      settings.x = Math.round(dragX);
+      settings.y = Math.round(dragY);
+      this.renderOuchLayoutTuner();
+    });
+    artLadder.on("drag", (_pointer, dragX, dragY) => {
+      settings.artX = Math.round(dragX);
+      settings.artY = Math.round(dragY);
+      this.renderOuchLayoutTuner();
+    });
+    this.ouchLayoutTunerKeyHandler = (event) => this.handleOuchLayoutTunerKey(event);
+    this.input.keyboard?.on("keydown", this.ouchLayoutTunerKeyHandler);
+    this.renderOuchLayoutTuner();
+  }
+
+  readOuchLayoutTunerSettings() {
+    try {
+      const raw = window.localStorage.getItem("giantStomp.ouchLayoutTuner.v1");
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  saveOuchLayoutTunerSettings() {
+    if (!this.ouchLayoutTuner || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "giantStomp.ouchLayoutTuner.v1",
+        JSON.stringify(this.ouchLayoutTuner.settings)
+      );
+    } catch (_) {
+      // Local storage is optional for this dev-only tool.
+    }
+  }
+
+  getOuchLayoutTunerStepY(index) {
+    const tuner = this.ouchLayoutTuner;
+    if (!tuner) return 0;
+    return tuner.settings.y - (tuner.settings.stepGap * 11) / 2 + index * tuner.settings.stepGap;
+  }
+
+  renderOuchLayoutTuner() {
+    const tuner = this.ouchLayoutTuner;
+    if (!tuner) return;
+    const { settings, graphics, artLadder, dragTarget, marker, panel } = tuner;
+    const topY = this.getOuchLayoutTunerStepY(0) - 20;
+    const bottomY = this.getOuchLayoutTunerStepY(11) + 20;
+    const leftX = settings.x - settings.width / 2;
+    const rightX = settings.x + settings.width / 2;
+    graphics.clear();
+    graphics.lineStyle(3, 0x00d9ff, 0.95);
+    graphics.strokeRect(leftX, topY, settings.width, bottomY - topY);
+    OUCH_LAYOUT_TUNER_VALUES.forEach((value, index) => {
+      const y = this.getOuchLayoutTunerStepY(index);
+      const active = index === settings.selectedStep;
+      graphics.lineStyle(active ? 5 : 2, active ? 0xffe066 : 0x5ae8ff, active ? 1 : 0.78);
+      graphics.lineBetween(leftX, y, rightX, y);
+      const label = this.add.text(rightX + 8, y, `x${value}`, {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "11px",
+        color: active ? "#fff3a6" : "#b7f7ff",
+        stroke: "#003343",
+        strokeThickness: 2,
+      }).setOrigin(0, 0.5).setDepth(DEPTH.ui + 21);
+      tuner.labels ||= [];
+      tuner.labels[index] ? tuner.labels[index].destroy() : null;
+      tuner.labels[index] = label;
+    });
+    marker.setPosition(leftX - 24, this.getOuchLayoutTunerStepY(settings.selectedStep));
+    dragTarget.setPosition(settings.x, settings.y).setSize(settings.width + 52, bottomY - topY + 40);
+    artLadder.setPosition(settings.artX, settings.artY).setDisplaySize(settings.artWidth, settings.artHeight);
+    this.applyOuchLayoutTunerCamera();
+    panel.setText(
+      `OUCH LADDER TUNER  (?ouchLayout=1)\n`
+      + `Drag cyan guide | Arrows move (${settings.x}, ${settings.y})\n`
+      + `[ / ] width: ${settings.width}   - / = step gap: ${settings.stepGap}\n`
+      + `Drag PICTURE ladder | Z / X picture width: ${settings.artWidth}   V / B picture height: ${settings.artHeight}\n`
+      + `Picture center: (${settings.artX}, ${settings.artY})\n`
+      + `, / . selected step: ${settings.selectedStep + 1}/${OUCH_LAYOUT_TUNER_VALUES.length}\n`
+      + `N / M foot pull: ${settings.pullDistance}px | Space preview pull\n`
+      + `W A S D camera: (${settings.cameraX}, ${settings.cameraY}) | Q / E zoom: ${settings.cameraZoom.toFixed(2)}\n`
+      + `C copy coordinates | R reset\n\n`
+      + `COPY THIS:\n`
+      + `{ x: ${settings.x}, y: ${settings.y}, width: ${settings.width}, stepGap: ${settings.stepGap}, selectedStep: ${settings.selectedStep}, pullDistance: ${settings.pullDistance}, cameraX: ${settings.cameraX}, cameraY: ${settings.cameraY}, cameraZoom: ${settings.cameraZoom.toFixed(2)}, artX: ${settings.artX}, artY: ${settings.artY}, artWidth: ${settings.artWidth}, artHeight: ${settings.artHeight} }`
+    );
+    this.saveOuchLayoutTunerSettings();
+  }
+
+  applyOuchLayoutTunerCamera() {
+    const tuner = this.ouchLayoutTuner;
+    if (!tuner?.camera) return;
+    tuner.camera.setZoom(tuner.baseCameraZoom * tuner.settings.cameraZoom);
+    tuner.camera.setScroll(
+      tuner.baseCameraScrollX + tuner.settings.cameraX,
+      tuner.baseCameraScrollY + tuner.settings.cameraY
+    );
+  }
+
+  async previewOuchLayoutTunerPull() {
+    const tuner = this.ouchLayoutTuner;
+    const foot = this.ouchFoot;
+    if (!tuner || !foot?.active) return;
+    const baseY = tuner.previewFootY ?? foot.y;
+    await this.tweenPromise({
+      targets: foot,
+      y: baseY + tuner.settings.pullDistance,
+      duration: 150,
+      ease: "Quad.easeIn",
+    });
+    await this.waitForPresentation(90, { skippable: true });
+    await this.tweenPromise({
+      targets: foot,
+      y: baseY,
+      duration: 130,
+      ease: "Quad.easeOut",
+    });
+  }
+
+  handleOuchLayoutTunerKey(event) {
+    const tuner = this.ouchLayoutTuner;
+    if (!tuner) return;
+    const { settings } = tuner;
+    const move = event.shiftKey ? 10 : 2;
+    const cameraMove = event.shiftKey ? 80 : 20;
+    const key = event.key;
+    if (key === "ArrowLeft") settings.x -= move;
+    else if (key === "ArrowRight") settings.x += move;
+    else if (key === "ArrowUp") settings.y -= move;
+    else if (key === "ArrowDown") settings.y += move;
+    else if (key === "[") settings.width = Phaser.Math.Clamp(settings.width - 4, 30, 240);
+    else if (key === "]") settings.width = Phaser.Math.Clamp(settings.width + 4, 30, 240);
+    else if (key === "-") settings.stepGap = Phaser.Math.Clamp(settings.stepGap - 2, 12, 120);
+    else if (key === "=") settings.stepGap = Phaser.Math.Clamp(settings.stepGap + 2, 12, 120);
+    else if (key === ",") settings.selectedStep = Phaser.Math.Clamp(settings.selectedStep - 1, 0, 11);
+    else if (key === ".") settings.selectedStep = Phaser.Math.Clamp(settings.selectedStep + 1, 0, 11);
+    else if (key.toLowerCase() === "n") settings.pullDistance = Phaser.Math.Clamp(settings.pullDistance - 2, 2, 120);
+    else if (key.toLowerCase() === "m") settings.pullDistance = Phaser.Math.Clamp(settings.pullDistance + 2, 2, 120);
+    else if (key.toLowerCase() === "a") settings.cameraX -= cameraMove;
+    else if (key.toLowerCase() === "d") settings.cameraX += cameraMove;
+    else if (key.toLowerCase() === "w") settings.cameraY -= cameraMove;
+    else if (key.toLowerCase() === "s") settings.cameraY += cameraMove;
+    else if (key.toLowerCase() === "q") settings.cameraZoom = Phaser.Math.Clamp(settings.cameraZoom - 0.05, 0.5, 2);
+    else if (key.toLowerCase() === "e") settings.cameraZoom = Phaser.Math.Clamp(settings.cameraZoom + 0.05, 0.5, 2);
+    else if (key.toLowerCase() === "z") settings.artWidth = Phaser.Math.Clamp(settings.artWidth - 4, 30, 320);
+    else if (key.toLowerCase() === "x") settings.artWidth = Phaser.Math.Clamp(settings.artWidth + 4, 30, 320);
+    else if (key.toLowerCase() === "v") settings.artHeight = Phaser.Math.Clamp(settings.artHeight - 8, 100, 1200);
+    else if (key.toLowerCase() === "b") settings.artHeight = Phaser.Math.Clamp(settings.artHeight + 8, 100, 1200);
+    else if (key === " ") {
+      this.previewOuchLayoutTunerPull();
+      return;
+    }
+    else if (key.toLowerCase() === "r") {
+      tuner.camera?.setZoom(tuner.baseCameraZoom).setScroll(tuner.baseCameraScrollX, tuner.baseCameraScrollY);
+      window.localStorage.removeItem("giantStomp.ouchLayoutTuner.v1");
+      this.destroyOuchLayoutTuner();
+      this.createOuchLayoutTuner();
+      return;
+    } else if (key.toLowerCase() === "c") {
+      const payload = JSON.stringify(settings);
+      console.log("OUCH LADDER TUNER", payload);
+      navigator.clipboard?.writeText(payload).catch(() => {});
+      tuner.panel?.setText?.(tuner.panel.text.replace("COPY THIS:", "COPIED:"));
+      return;
+    } else return;
+    event.preventDefault();
+    this.renderOuchLayoutTuner();
+  }
+
+  destroyOuchLayoutTuner() {
+    const tuner = this.ouchLayoutTuner;
+    if (!tuner) return;
+    this.input.keyboard?.off("keydown", this.ouchLayoutTunerKeyHandler);
+    tuner.graphics?.destroy();
+    tuner.artLadder?.destroy();
+    tuner.dragTarget?.destroy();
+    tuner.marker?.destroy();
+    tuner.panel?.destroy();
+    tuner.labels?.forEach((label) => label?.destroy());
+    this.ouchLayoutTuner = null;
+    this.ouchLayoutTunerKeyHandler = null;
   }
 
   createEnvironment() {
@@ -340,21 +637,40 @@ export class GameScene extends Phaser.Scene {
       fontSize: "24px",
       align: "center",
     }).setOrigin(0.5).setDepth(DEPTH.ui).setVisible(false);
+    this.totalWinFormulaText = this.add.text(centerX, bottom + 46, "", {
+      ...textStyle,
+      fontSize: "22px",
+      color: "#f5df8a",
+    }).setOrigin(0.5).setDepth(DEPTH.ui + 1).setVisible(false);
     this.freespinText = this.add.text(centerX, GRID_OFFSET_Y - 38, "", {
       ...textStyle,
       fontSize: "25px",
     }).setOrigin(0.5).setDepth(DEPTH.ui).setVisible(false);
 
-    const meterWidth = 168;
+    const meterWidth = 130;
+    const bonusBadgeWidth = 58;
+    const bonusBadgeGap = 8;
     const segmentGap = 2;
     const segmentWidth = (meterWidth - segmentGap * (ANGER_SEGMENT_COUNT - 1)) / ANGER_SEGMENT_COUNT;
-    const meterX = GRID_OFFSET_X + GRID_WIDTH_PX - meterWidth - 8;
+    const meterX = GRID_OFFSET_X + GRID_WIDTH_PX - meterWidth - bonusBadgeWidth - bonusBadgeGap - 4;
     const meterY = bottom + 88;
-    this.angerLabel = this.add.text(meterX - 14, meterY, "ANGER", {
+    this.angerLabel = this.add.text(meterX - 12, meterY, "ANGER\nMETER", {
       fontFamily: "Arial Black, Arial",
-      fontSize: "16px",
-      color: "#ffd6b0",
-    }).setOrigin(1, 0.5).setDepth(DEPTH.ui);
+      fontSize: "13px",
+      align: "right",
+      lineSpacing: -3,
+      color: "#ffe1a8",
+      stroke: "#3a130d",
+      strokeThickness: 3,
+    }).setOrigin(1, 0.5).setDepth(DEPTH.ui + 1);
+    this.angerMeterCaption = this.add.text(meterX + meterWidth / 2, meterY - 16, "FEED THE FURY", {
+      fontFamily: "Arial Black, Arial",
+      fontSize: "8px",
+      color: "#f6b35f",
+      letterSpacing: 1,
+      stroke: "#3a130d",
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(DEPTH.ui + 1);
     this.angerSegments = Array.from({ length: ANGER_SEGMENT_COUNT }, (_, index) => this.add.rectangle(
       meterX + segmentWidth / 2 + index * (segmentWidth + segmentGap),
       meterY,
@@ -363,6 +679,20 @@ export class GameScene extends Phaser.Scene {
       0x341912,
       0.9
     ).setStrokeStyle(1, 0x9b4b2b, 1).setDepth(DEPTH.ui));
+    this.angerBonusBadge = this.add.text(
+      meterX + meterWidth + bonusBadgeGap + bonusBadgeWidth / 2,
+      meterY,
+      "BONUS",
+      {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "12px",
+        color: "#a96648",
+        backgroundColor: "#351712",
+        stroke: "#170806",
+        strokeThickness: 3,
+        padding: { left: 5, right: 5, top: 3, bottom: 3 },
+      }
+    ).setOrigin(0.5).setDepth(DEPTH.ui + 1);
     this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
 
     this.createBonusUi();
@@ -438,6 +768,13 @@ export class GameScene extends Phaser.Scene {
       segment.lifeActive = true;
       return segment;
     });
+    this.lifeLabels = this.lifeSegments.map((segment, index) => this.add.text(segment.x, segment.y, String(index + 1), {
+      fontFamily: "Arial Black, Arial",
+      fontSize: "11px",
+      color: "#fff1b8",
+      stroke: "#241508",
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(DEPTH.ui + 1));
 
     TRAP_SYMBOLS.forEach((symbol, trapIndex) => {
       const x = centerX + (trapIndex - 1.5) * 82;
@@ -466,7 +803,7 @@ export class GameScene extends Phaser.Scene {
 
     this.createDamageMeter(DEFAULT_DAMAGE_METER_SEGMENTS);
 
-    this.trapPowerText = this.add.text(centerX, bottom + 94, "TRAP POWER 0.00", {
+    this.trapPowerText = this.add.text(centerX, bottom + 94, "0.00", {
       ...textStyle,
       fontSize: "16px",
       color: "#32df7f",
@@ -484,6 +821,7 @@ export class GameScene extends Phaser.Scene {
 
     this.bonusUi = [
       ...this.lifeSegments,
+      ...this.lifeLabels,
       this.trapPowerText,
       this.trapPowerMultiplierText,
       ...Object.values(this.trapLightGroups)
@@ -508,13 +846,79 @@ export class GameScene extends Phaser.Scene {
       : [...DEFAULT_DAMAGE_METER_SEGMENTS];
     const isOuch = this.damageMeterOrientation === "ouch";
     if (isOuch) {
-      this.createOuchDamageMeter(values);
+      this.damageMeterUsesOuchLadder = this.canUseAuthoredOuchLadder(values);
+      if (this.damageMeterUsesOuchLadder) {
+        this.createOuchLadderMeter(values);
+      } else {
+        this.createOuchDamageMeter(values);
+      }
     } else {
+      this.damageMeterUsesOuchLadder = false;
       this.createBonusDamageMeter(values);
     }
     this.applyDamageMeterHighlight();
-    this.syncDamageMeterFootPosition(this.damageMeterActiveIndex ?? 0);
+    if (!this.damageMeterUsesOuchLadder) {
+      this.syncDamageMeterFootPosition(this.damageMeterActiveIndex ?? 0);
+    }
     this.damageMeterObjects.forEach((object) => object.setVisible(this.isBonusUiVisible || this.isPostBonusOuch));
+  }
+
+  canUseAuthoredOuchLadder(values = []) {
+    return values.length === AUTHORED_OUCH_LADDER_SEGMENTS.length
+      && values.every((value, index) => Number(value) === AUTHORED_OUCH_LADDER_SEGMENTS[index]);
+  }
+
+  createOuchLadderMeter(values = []) {
+    const layout = getOuchDamageMeterLadderLayout(values.length);
+    this.damageMeterValues = [...values];
+    this.damageMeterSlots = layout.slots;
+    this.damageMeterLadderLayout = layout;
+    this.damageMeterLadderDisplayIndex = -1;
+    this.damageMeterPanel = null;
+    this.damageMeterTitle = null;
+    this.damageMeterStatusText = this.add.text(
+      GRID_OFFSET_X + GRID_WIDTH_PX / 2,
+      GRID_OFFSET_Y + 16 + OUCH_UI_OFFSET_Y,
+      "",
+      {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "9px",
+        color: "#ffe7a6",
+        stroke: "#241508",
+        strokeThickness: 2,
+      }
+    ).setOrigin(0.5).setDepth(DEPTH.ui + 2).setVisible(false);
+    this.damageMeterObjects.push(this.damageMeterStatusText);
+
+    this.damageMeterLadder = this.add.image(layout.centerX, layout.centerY, "ouch_damage_meter_ladder")
+      .setDisplaySize(layout.artWidth, layout.artHeight)
+      .setDepth(DEPTH.board + 1);
+    this.damageMeterFoot = this.add.image(layout.slots[0]?.x || layout.centerX, layout.startY, "ouch_damage_meter_foot")
+      .setOrigin(0.5)
+      .setScale(layout.scale * 0.72)
+      .setDepth(DEPTH.symbols + 5);
+    this.damageMeterObjects.push(this.damageMeterLadder, this.damageMeterFoot);
+
+    values.forEach((value, index) => {
+      const slot = layout.slots[index];
+      const numberSprite = this.add.text(layout.numberX, slot?.y ?? layout.startY, `x${value}`, {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "14px",
+        color: "#e7c581",
+        stroke: "#1a1007",
+        strokeThickness: 2,
+      }).setOrigin(0, 0.5).setDepth(DEPTH.symbols + 4);
+      this.damageMeterEntries.push({
+        value,
+        marker: null,
+        label: null,
+        numberSprite,
+        bankedStamp: null,
+        activeColor: getMultiplierSegmentColor(index, values.length),
+        baseScale: 1,
+      });
+      this.damageMeterObjects.push(numberSprite);
+    });
   }
 
   createOuchDamageMeter(values = []) {
@@ -564,7 +968,7 @@ export class GameScene extends Phaser.Scene {
       const marker = this.add.rectangle(slot.x, slot.y, segmentWidth, segmentHeight, 0x111923, 0.94)
         .setStrokeStyle(2, activeColor, 0.74)
         .setDepth(DEPTH.ui);
-      const label = this.add.text(slot.x, slot.y, `${value}x`, {
+      const label = this.add.text(slot.x, slot.y, `x${value}`, {
         fontFamily: "Arial Black, Arial",
         fontSize: "8px",
         color: "#ffffff",
@@ -605,7 +1009,7 @@ export class GameScene extends Phaser.Scene {
     values.forEach((value, index) => {
       const slot = this.damageMeterSlots[index];
       const activeColor = getMultiplierSegmentColor(index, values.length);
-      const numberSprite = this.add.text(slot.x, slot.numberY, `${value}x`, {
+      const numberSprite = this.add.text(slot.x, slot.numberY, `x${value}`, {
         fontFamily: "Arial Black, Arial",
         fontSize: `${Math.max(9, 26 * scale)}px`,
         color: "#e7c581",
@@ -639,7 +1043,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(BONUS_METER_DEPTH.foot);
     this.damageMeterObjects.push(this.damageMeterFoot);
 
-    this.damageMeterActiveNumber = this.add.text(centerX, centerY, "1x", {
+    this.damageMeterActiveNumber = this.add.text(centerX, centerY, "x1", {
       fontFamily: "Arial Black, Arial",
       fontSize: `${Math.max(13, 34 * scale)}px`,
       color: "#fff1c7",
@@ -665,7 +1069,7 @@ export class GameScene extends Phaser.Scene {
       const dot = this.add.circle(slot.x, slot.numberY, 4, 0x00ff44, 1)
         .setDepth(BONUS_METER_DEPTH.debug)
         .setStrokeStyle(1, 0xffffff, 0.9);
-      const label = this.add.text(slot.x, slot.numberY - 9, `${value}x`, {
+      const label = this.add.text(slot.x, slot.numberY - 9, `x${value}`, {
         fontFamily: "Arial Black, Arial",
         fontSize: "7px",
         color: "#00ff44",
@@ -722,7 +1126,14 @@ export class GameScene extends Phaser.Scene {
 
   syncDamageMeterFootPosition(index = 0) {
     const slot = this.damageMeterSlots?.[index];
-    if (!slot || !this.damageMeterFoot || this.damageMeterOrientation !== "bonus") return;
+    if (!slot || !this.damageMeterFoot) return;
+    if (this.damageMeterUsesOuchLadder) {
+      this.damageMeterLadderDisplayIndex = index;
+      this.damageMeterFoot.setPosition(slot.x, slot.footY);
+      this.refreshOuchTrapRig();
+      return;
+    }
+    if (this.damageMeterOrientation !== "bonus") return;
     this.damageMeterFoot.setPosition(slot.x, slot.footY);
     this.damageMeterFoot.setDepth(BONUS_METER_DEPTH.foot);
     this.syncDamageMeterActiveNumber(index);
@@ -737,7 +1148,7 @@ export class GameScene extends Phaser.Scene {
     }
     const value = this.damageMeterEntries?.[index]?.value ?? 1;
     this.damageMeterActiveNumber
-      .setText(`${value}x`)
+      .setText(`x${value}`)
       .setPosition(slot.x, slot.numberY)
       .setColor("#fff3c4")
       .setStroke("#5a2d09", Math.max(2, (this.damageMeterReelScale || 1) * 3))
@@ -858,16 +1269,15 @@ export class GameScene extends Phaser.Scene {
         if (index === 0 && !this.damageMeterIntroComplete) {
           entry.numberSprite.setAlpha(0);
         } else {
-        let numberColor = "#987953";
+        const ladderColor = this.getDamageMultiplierCssColor(entry);
+        let numberColor = ladderColor;
         let numberStroke = "#1c1007";
         let numberAlpha = 0.65;
         let numberScale = 1;
         if (isPassed) {
-          numberColor = "#b18b59";
           numberAlpha = isBanked ? 0.8 : 0.68;
         }
         if (isNext) {
-          numberColor = "#ffda82";
           numberStroke = "#482406";
           numberAlpha = 1;
           numberScale = 1.1;
@@ -881,6 +1291,7 @@ export class GameScene extends Phaser.Scene {
       } else if (entry.numberSprite) {
         const baseScale = entry.baseScale || this.damageMeterReelScale || 1;
         entry.numberSprite
+          .setColor(this.getDamageMultiplierCssColor(entry))
           .setAlpha(labelAlpha)
           .setScale(baseScale * labelScale)
           .clearTint();
@@ -999,6 +1410,8 @@ export class GameScene extends Phaser.Scene {
     this.layoutDamageMeterChrome();
     if (this.damageMeterOrientation === "bonus") {
       this.layoutBonusDamageMeterArt();
+    } else if (this.damageMeterUsesOuchLadder) {
+      this.layoutOuchDamageMeterArt();
     } else {
       this.damageMeterEntries.forEach((entry, index) => {
         const slot = this.damageMeterSlots[index];
@@ -1008,8 +1421,31 @@ export class GameScene extends Phaser.Scene {
         entry.bankedStamp?.setPosition(slot.x, slot.y);
       });
     }
-    this.syncDamageMeterFootPosition(this.damageMeterActiveIndex ?? 0);
+    if (!this.damageMeterUsesOuchLadder) {
+      this.syncDamageMeterFootPosition(this.damageMeterActiveIndex ?? 0);
+    }
     this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
+  }
+
+  layoutOuchDamageMeterArt() {
+    const layout = getOuchDamageMeterLadderLayout(this.damageMeterValues.length);
+    this.damageMeterLadderLayout = layout;
+    this.damageMeterSlots = layout.slots;
+    this.damageMeterLadder
+      ?.setPosition(layout.centerX, layout.centerY)
+      .setDisplaySize(layout.artWidth, layout.artHeight)
+      .setDepth(DEPTH.board + 1);
+    this.damageMeterFoot?.setScale(layout.scale * 0.72).setDepth(DEPTH.symbols + 5);
+    this.damageMeterEntries.forEach((entry, index) => {
+      const slot = layout.slots[index];
+      entry.numberSprite?.setPosition(layout.numberX, slot?.y || layout.startY);
+    });
+    if (this.damageMeterLadderDisplayIndex < 0) {
+      this.damageMeterFoot?.setPosition(layout.slots[0]?.x || layout.centerX, layout.startY);
+      return;
+    }
+    const slot = layout.slots[this.damageMeterLadderDisplayIndex];
+    this.damageMeterFoot?.setPosition(slot?.x || layout.centerX, slot?.footY || layout.startY);
   }
 
   async advanceDamageMeterSegment(value) {
@@ -1063,6 +1499,7 @@ export class GameScene extends Phaser.Scene {
       scaleY: footScale * (fast ? 0.98 : 0.86),
       duration: fast ? 52 : 170,
       ease: "Quad.easeOut",
+      onUpdate: () => this.refreshOuchTrapRig(),
     });
 
     await this.tweenPromise({
@@ -1072,6 +1509,7 @@ export class GameScene extends Phaser.Scene {
       scaleY: footScale * 1.03,
       duration: fast ? 38 : 185,
       ease: "Quad.easeIn",
+      onUpdate: () => this.refreshOuchTrapRig(),
     });
 
     await this.tweenPromise({
@@ -1081,6 +1519,7 @@ export class GameScene extends Phaser.Scene {
       scaleY: footScale * 0.97,
       duration: fast ? 26 : 68,
       ease: "Quad.easeOut",
+      onUpdate: () => this.refreshOuchTrapRig(),
     });
 
     this.cameras.main.shake(fast ? 58 : 190, fast ? 0.006 : 0.014);
@@ -1106,6 +1545,7 @@ export class GameScene extends Phaser.Scene {
       scaleY: footScale * 0.93,
       duration: 72,
       ease: "Quad.easeIn",
+      onUpdate: () => this.refreshOuchTrapRig(),
     });
 
     this.cameras.main.shake(88, 0.007);
@@ -1128,6 +1568,7 @@ export class GameScene extends Phaser.Scene {
       await this.presentOuchDamageMeterCharge(1, 0, { fast: true });
       await this.presentOuchFootRecoilStomp(impact, { fast: true });
       await this.pulseDamageMeterHighlight(index, { fast: true });
+      await this.moveOuchLadderFootToIndex(index, { fast: true });
       this.applyDamageMeterHighlight(index + 1);
       this.spawnOuchPainEffects(centerX, centerY, 0.45 + index * 0.06);
       const multiplier = Number(this.damageMeterEntries[index]?.value) || 1;
@@ -1504,6 +1945,13 @@ export class GameScene extends Phaser.Scene {
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
     const bottom = GRID_OFFSET_Y + GRID_HEIGHT_PX;
     if (this.damageMeterOrientation === "ouch") {
+      if (this.damageMeterUsesOuchLadder) {
+        this.damageMeterStatusText?.setPosition(
+          GRID_OFFSET_X + GRID_WIDTH_PX / 2,
+          GRID_OFFSET_Y + 16 + OUCH_UI_OFFSET_Y
+        );
+        return;
+      }
       const railHeight = GRID_HEIGHT_PX - 28;
       const railX = GRID_OFFSET_X + 48;
       const railTop = GRID_OFFSET_Y + 14 + OUCH_UI_OFFSET_Y;
@@ -1543,6 +1991,9 @@ export class GameScene extends Phaser.Scene {
       ?.setPosition(layout.centerX, layout.amountY)
       .setFontSize(layout.amountFontSize)
       .setScale(layout.amountScale, layout.amountScale);
+    this.totalWinFormulaText
+      ?.setPosition(layout.centerX, layout.amountY)
+      .setFontSize(layout.titleFontSize);
     return layout;
   }
 
@@ -1553,6 +2004,7 @@ export class GameScene extends Phaser.Scene {
   createSymbol(symbol, reel, row, startY = null, textureKey = null) {
     const center = getCellCenter(reel, row);
     const texture = textureKey
+      || this.getAnimalEmotionTexture(symbol)
       || (this.textures.exists(String(symbol)) ? String(symbol) : "1");
     const x = center.x;
     const y = startY ?? center.y;
@@ -2312,6 +2764,46 @@ export class GameScene extends Phaser.Scene {
     this.angerSegments?.forEach((segment) => segment.setAlpha(1));
   }
 
+  stopAngerBonusPulse() {
+    if (this.angerBonusPulseTween) {
+      this.angerBonusPulseTween.stop();
+      this.angerBonusPulseTween.remove();
+      this.angerBonusPulseTween = null;
+    }
+  }
+
+  syncAngerBonusBadge(count = 0, max = ANGER_SEGMENT_COUNT) {
+    const bonusReady = Number(count) >= Math.max(1, Number(max) || ANGER_SEGMENT_COUNT);
+    const badge = this.angerBonusBadge;
+    if (!badge) return;
+
+    if (!bonusReady) {
+      this.stopAngerBonusPulse();
+      badge
+        .setColor("#a96648")
+        .setBackgroundColor("#351712")
+        .setScale(1)
+        .setAlpha(0.86);
+      return;
+    }
+
+    badge
+      .setColor("#fff2a8")
+      .setBackgroundColor("#a62d18")
+      .setAlpha(1);
+    if (this.angerBonusPulseTween || !this.tweens) return;
+    this.angerBonusPulseTween = this.tweens.add({
+      targets: badge,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      alpha: 0.72,
+      duration: 190,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+  }
+
   syncAngerBlink(count = 0, max = ANGER_SEGMENT_COUNT) {
     this.stopAngerBlink();
     const litCount = this.getLitAngerSegmentCount(count, max);
@@ -2758,12 +3250,69 @@ export class GameScene extends Phaser.Scene {
       this.ouchBackground,
       this.reelFrame,
       this.reelMaskShape,
+      this.damageMeterUsesOuchLadder ? this.damageMeterLadder : null,
+      this.damageMeterUsesOuchLadder ? this.damageMeterFoot : null,
+      ...(this.damageMeterUsesOuchLadder
+        ? this.damageMeterEntries.map((entry) => entry.numberSprite).filter(Boolean)
+        : []),
+      this.ouchGear,
       ...sprites,
     ].filter(Boolean);
   }
 
-  async scrollOuchPit(deltaY = OUCH_PIT_STEP_DELTA_Y, { fast = false } = {}) {
-    const shift = Number(deltaY) || OUCH_PIT_STEP_DELTA_Y;
+  getAnimalEmotionTexture(symbol, emotion = this.animalEmotion) {
+    if (!ANIMAL_SYMBOLS.has(Number(symbol)) || !emotion || emotion === "normal") return null;
+    const texture = `animal_${Number(symbol)}_${emotion}`;
+    return this.textures.exists(texture) ? texture : null;
+  }
+
+  async crossfadeAnimalEmotion(emotion = "normal", { excludeCells = [], duration = 120 } = {}) {
+    const excluded = new Set((excludeCells || []).map((cell) => `${Number(cell.reel)}:${Number(cell.row)}`));
+    const swaps = this.reelSprites.flat().filter((sprite) => (
+      sprite?.active
+      && ANIMAL_SYMBOLS.has(Number(sprite.symbolId))
+      && !excluded.has(`${Number(sprite.reel)}:${Number(sprite.row)}`)
+    )).map((sprite) => {
+      const texture = this.getAnimalEmotionTexture(sprite.symbolId, emotion)
+        || String(sprite.symbolId);
+      if (sprite.baseTextureKey === texture) return Promise.resolve();
+      const replacement = this.add.image(sprite.x, sprite.y, texture)
+        .setScale(sprite.scaleX, sprite.scaleY)
+        .setDepth(sprite.depth)
+        .setAngle(sprite.angle)
+        .setAlpha(0)
+        .setFlip(sprite.flipX, sprite.flipY);
+      if (this.reelMask) replacement.setMask(this.reelMask);
+      Object.assign(replacement, {
+        symbolId: sprite.symbolId,
+        reel: sprite.reel,
+        row: sprite.row,
+        baseTextureKey: texture,
+      });
+      this.reelSprites[sprite.reel][sprite.row] = replacement;
+      return Promise.all([
+        this.tweenPromise({ targets: sprite, alpha: 0, duration, ease: "Quad.easeIn" }),
+        this.tweenPromise({ targets: replacement, alpha: 1, duration, ease: "Quad.easeOut" }),
+      ]).then(() => sprite.destroy());
+    });
+    this.animalEmotion = emotion;
+    await Promise.all(swaps);
+  }
+
+  async resolveAnimalAngerMood(bonusTriggered = false) {
+    if (bonusTriggered) {
+      this.animalEmotion = "angry";
+      return;
+    }
+    if (this.animalEmotion !== "angry" && this.animalEmotion !== "scared") return;
+    await this.waitForPresentation(this.fastForwardRequested ? 40 : 360, { skippable: true });
+    await this.crossfadeAnimalEmotion("normal", { duration: this.fastForwardRequested ? 50 : 140 });
+  }
+
+  async scrollOuchPit(deltaY = undefined, { fast = false } = {}) {
+    const shift = Number(deltaY)
+      || (this.damageMeterUsesOuchLadder ? this.damageMeterLadderLayout?.stepGap : 0)
+      || OUCH_PIT_STEP_DELTA_Y;
     this.ouchScrollY += shift;
     const targets = this.getOuchScrollTargets();
     await Promise.all(targets.map((target) => this.tweenPromise({
@@ -2771,7 +3320,9 @@ export class GameScene extends Phaser.Scene {
       y: target.y - shift,
       duration: fast ? 78 : 165,
       ease: "Cubic.easeInOut",
+      onUpdate: () => this.refreshOuchTrapRig(),
     })));
+    this.refreshOuchTrapRig();
     this.cameras.main.shake(fast ? 44 : 105, fast ? 0.0028 : 0.005);
   }
 
@@ -2782,6 +3333,182 @@ export class GameScene extends Phaser.Scene {
       target.y += shift;
     });
     this.ouchScrollY = 0;
+    this.refreshOuchTrapRig();
+  }
+
+  createOuchTrapRig(impact = {}) {
+    this.destroyOuchTrapRig();
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot?.active) return;
+
+    const footWidth = Number(impact?.footWidth) || GRID_WIDTH_PX;
+    this.ouchTrapImpact = { ...impact, foot, footWidth };
+    this.ouchTrapTension = 0.2;
+    // The supplied Ouch foot already contains the complete rope snare. The
+    // background now owns the winches, so only dust and the foot motion sell
+    // the pull; do not add a second foreground rope/gear rig.
+  }
+
+  refreshOuchTrapRig() {
+    const foot = this.ouchTrapImpact?.foot || this.ouchFoot;
+    const gear = this.ouchGear;
+    const snare = this.ouchSnare;
+    const rope = this.ouchRope;
+    if (!foot?.active || !gear?.active || !snare?.active || !rope?.active) return;
+
+    const footWidth = Number(this.ouchTrapImpact?.footWidth) || GRID_WIDTH_PX;
+    const snareX = foot.x - footWidth * 0.04;
+    const snareY = foot.y + footWidth * 0.06;
+    snare.setPosition(snareX, snareY);
+
+    // The winch sits below and beside the stomp. Its rope runs up from beneath
+    // the foot, so the pull reads as the trap dragging the giant downward.
+    const startX = gear.x - gear.displayWidth * 0.18;
+    const startY = gear.y - gear.displayHeight * 0.12;
+    const endX = snareX + snare.displayWidth * 0.28;
+    const endY = snareY + snare.displayHeight * 0.28;
+    const sag = (1 - Phaser.Math.Clamp(this.ouchTrapTension || 0, 0, 1)) * 24;
+    const controlX = (startX + endX) / 2 - 8;
+    const controlY = (startY + endY) / 2 + sag;
+    rope.clear();
+    rope.lineStyle(7, 0x351308, 0.96);
+    rope.beginPath();
+    rope.moveTo(startX, startY);
+    rope.lineTo(controlX, controlY);
+    rope.lineTo(endX, endY);
+    rope.strokePath();
+    rope.lineStyle(3, 0xe59a32, 0.95);
+    rope.beginPath();
+    rope.moveTo(startX, startY - 1);
+    rope.lineTo(controlX, controlY - 1);
+    rope.lineTo(endX, endY - 1);
+    rope.strokePath();
+  }
+
+  destroyOuchTrapRig() {
+    this.ouchGear?.destroy();
+    this.ouchSnare?.destroy();
+    this.ouchRope?.destroy();
+    this.ouchGear = null;
+    this.ouchSnare = null;
+    this.ouchRope = null;
+    this.ouchTrapImpact = null;
+    this.ouchTrapTension = 0;
+  }
+
+  async moveOuchLadderFootToIndex(index = 0, { fast = false } = {}) {
+    if (!this.damageMeterUsesOuchLadder || !this.damageMeterFoot) return;
+    const slot = this.damageMeterSlots?.[index];
+    if (!slot) return;
+    this.damageMeterLadderDisplayIndex = index;
+    await this.tweenPromise({
+      targets: this.damageMeterFoot,
+      x: slot.x,
+      // The pit and ladder scroll after every success. Target the rung in its
+      // current scrolled position so the arrow stays on that same rung.
+      y: slot.footY - this.ouchScrollY,
+      duration: fast ? 58 : 170,
+      ease: "Cubic.easeInOut",
+      onUpdate: () => this.refreshOuchTrapRig(),
+    });
+    if (this.isPostBonusOuch) {
+      // Do not reveal the new multiplier below the foot until its arrow has
+      // physically reached the confirmed rung.
+      this.ouchTrapPowerMultiplierIndex = index;
+      this.refreshTrapPowerDisplay();
+    }
+    this.refreshOuchTrapRig();
+  }
+
+  async presentOuchTrapStruggle(stepNumber = 1, impact = {}) {
+    if (!this.damageMeterUsesOuchLadder || this.fastForwardRequested) return;
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot?.active) return;
+    const marker = this.damageMeterFoot?.active ? this.damageMeterFoot : null;
+    const footY = foot.y;
+    const markerY = marker?.y;
+    const footWidth = Number(impact?.footWidth) || GRID_WIDTH_PX;
+    const tug = async (pullNumber) => {
+      this.setDamageMeterStatus(`NOW PULL! ${pullNumber}/3`, "#ffd166");
+      this.spawnOuchPullDust(foot, footWidth, pullNumber);
+      this.playRandomConstructionSfx();
+      await Promise.all([
+        this.tweenPromise({
+          targets: foot,
+          y: footY + 9 + pullNumber * 2,
+          duration: 105,
+          ease: "Quad.easeIn",
+        }),
+        marker ? this.tweenPromise({
+          targets: marker,
+          y: markerY + 7 + pullNumber * 2,
+          duration: 105,
+          ease: "Quad.easeIn",
+        }) : Promise.resolve(),
+      ]);
+      await this.waitForPresentation(82, { skippable: true });
+      await Promise.all([
+        this.tweenPromise({
+          targets: foot,
+          y: footY - 5,
+          duration: 92,
+          ease: "Quad.easeOut",
+        }),
+        marker ? this.tweenPromise({
+          targets: marker,
+          y: markerY - 4,
+          duration: 92,
+          ease: "Quad.easeOut",
+        }) : Promise.resolve(),
+      ]);
+    };
+
+    this.setDamageMeterStatus(stepNumber > 1 ? "THE GIANT FIGHTS BACK!" : "TRAP PULLS TIGHT!", "#ffd166");
+    await tug(1);
+    await tug(2);
+    await tug(3);
+  }
+
+  async presentOuchTrapRecoil() {
+    const foot = this.ouchFoot;
+    if (!foot?.active) return;
+    this.spawnOuchPullDust(foot, this.ouchTrapImpact?.footWidth || GRID_WIDTH_PX, 4);
+    await this.tweenPromise({
+      targets: foot,
+      y: foot.y - 12,
+      duration: 180,
+      ease: "Quad.easeOut",
+    });
+    this.setDamageMeterStatus("THE GIANT RIPS FREE!", "#ff8585");
+  }
+
+  spawnOuchPullDust(foot, footWidth = GRID_WIDTH_PX, pullNumber = 1) {
+    if (!foot?.active) return;
+    const colors = [0x6e4829, 0x9a6a3d, 0xc79758, 0xe0bb78];
+    const dustY = foot.y + footWidth * 0.35;
+    for (let index = 0; index < 10; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const dust = this.add.ellipse(
+        foot.x + side * footWidth * Phaser.Math.FloatBetween(0.36, 0.52),
+        dustY + Phaser.Math.Between(-22, 24),
+        Phaser.Math.Between(10, 22),
+        Phaser.Math.Between(7, 15),
+        colors[index % colors.length],
+        0.66
+      ).setDepth(DEPTH.stompVfx - 1);
+      this.tweenPromise({
+        targets: dust,
+        x: dust.x + side * Phaser.Math.Between(12, 38),
+        y: dust.y + Phaser.Math.Between(18, 54),
+        scaleX: Phaser.Math.FloatBetween(1.4, 2.2),
+        scaleY: Phaser.Math.FloatBetween(1.2, 1.8),
+        alpha: 0,
+        delay: index * 14 + pullNumber * 8,
+        duration: Phaser.Math.Between(230, 380),
+        ease: "Quad.easeOut",
+        onComplete: () => dust.destroy(),
+      });
+    }
   }
 
   async spawnOuchWinCoins(centerX, centerY, count = 1, totalWin = 0, { fast = false } = {}) {
@@ -2845,6 +3572,7 @@ export class GameScene extends Phaser.Scene {
   async presentOuchDamageMeterCharge(stepNumber = 1, leadInMs = 0, { fast = false } = {}) {
     const activeIndex = this.damageMeterActiveIndex ?? 0;
     const activeEntry = this.damageMeterEntries[activeIndex];
+    if (this.damageMeterUsesOuchLadder) return;
     if (!activeEntry) {
       if (leadInMs > 0) {
         await this.waitForPresentation(leadInMs, { skippable: true });
@@ -3006,23 +3734,26 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(1);
     entry.label?.setColor("#1b2a18").setAlpha(1).setScale(1.16);
     this.playSfx("wins_explode", { volume: 0.56 });
-    await Promise.all([
-      this.tweenPromise({
+    const confirmationTweens = [
+      entry.marker ? this.tweenPromise({
         targets: entry.marker,
         scaleX: entry.marker.scaleX * 1.22,
         scaleY: entry.marker.scaleY * 1.22,
         duration: 105,
         yoyo: true,
         ease: "Back.easeOut",
-      }),
-      this.tweenPromise({
+      }) : null,
+      entry.label ? this.tweenPromise({
         targets: entry.label,
         scaleX: entry.label.scaleX * 1.18,
         scaleY: entry.label.scaleY * 1.18,
         duration: 105,
         yoyo: true,
         ease: "Back.easeOut",
-      }),
+      }) : null,
+    ].filter(Boolean);
+    await Promise.all([
+      ...confirmationTweens,
       this.spawnOuchDrawSuccessStars(entry),
       this.spawnOuchDepthArrows(entry),
     ]);
@@ -3137,8 +3868,20 @@ export class GameScene extends Phaser.Scene {
     this.startOuchTheme();
     this.spawnOuchDebrisBurst(bounds.centerX, impactY + CELL_SIZE * 0.12, footWidth * 1.08);
     this.spawnOuchImpactCloud(bounds.centerX, impactY + CELL_SIZE * 0.1, footWidth * 1.12);
-    this.ouchFoot = foot;
-    return { foot, impactY, footWidth, footScale, bounds };
+    const snaredFoot = this.add.image(bounds.centerX, impactY, "ouch_snared_foot")
+      .setDepth(DEPTH.stomp)
+      .setScale(foot.scaleX, foot.scaleY)
+      .setAlpha(0);
+    await Promise.all([
+      this.tweenPromise({ targets: foot, alpha: 0, duration: 110, ease: "Quad.easeIn" }),
+      this.tweenPromise({ targets: snaredFoot, alpha: 0.98, duration: 110, ease: "Quad.easeOut" }),
+    ]);
+    foot.destroy();
+    this.ouchFoot = snaredFoot;
+    const impact = { foot: snaredFoot, impactY, footWidth, footScale, bounds };
+    this.createOuchTrapRig(impact);
+    this.layoutTrapPowerTexts(this.trapMeterState?.power ?? 0);
+    return impact;
   }
 
   spawnOuchPainEffects(centerX, centerY, intensity = 1) {
@@ -3254,6 +3997,7 @@ export class GameScene extends Phaser.Scene {
       alpha: 0.72,
       duration: 720,
       ease: "Cubic.easeOut",
+      onUpdate: () => this.refreshOuchTrapRig(),
     });
 
     await this.waitForPresentation(260, { skippable: true });
@@ -3273,7 +4017,156 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  async presentOuchTotalWinSequence(totalWin = 0) {
+  clearTotalWinCelebration() {
+    this.totalWinCelebrationTimers?.forEach((timer) => timer?.remove?.(false));
+    this.totalWinCelebrationTimers = [];
+    this.totalWinCelebrants?.forEach((item) => {
+      this.tweens?.killTweensOf(item);
+      item?.destroy?.();
+    });
+    this.totalWinCelebrants = [];
+  }
+
+  startTotalWinCelebration() {
+    this.clearTotalWinCelebration();
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.57;
+    const partySlots = [
+      { symbol: 1, x: -154, y: 126, tilt: -9 },
+      { symbol: 2, x: -54, y: 134, tilt: 7 },
+      { symbol: 4, x: 54, y: 134, tilt: -7 },
+      { symbol: 5, x: 154, y: 126, tilt: 9 },
+    ];
+
+    partySlots.forEach((slot, index) => {
+      const texture = this.getAnimalEmotionTexture(slot.symbol, "celebrating");
+      if (!texture) return;
+      const source = this.textures.get(texture)?.getSourceImage?.();
+      const scale = Phaser.Math.Clamp(148 / Math.max(source?.width || 260, source?.height || 260), 0.22, 0.62);
+      const animal = this.add.image(centerX + slot.x, centerY + slot.y, texture)
+        .setDepth(DEPTH.ui - 1)
+        .setScale(scale)
+        .setAngle(slot.tilt)
+        .setAlpha(0);
+      this.totalWinCelebrants.push(animal);
+      this.tweens.add({
+        targets: animal,
+        alpha: 1,
+        y: animal.y - 8,
+        duration: 220 + index * 35,
+        ease: "Back.easeOut",
+      });
+      this.tweens.add({
+        targets: animal,
+        y: animal.y - 13,
+        angle: slot.tilt + (index % 2 ? 5 : -5),
+        scaleX: scale * 1.06,
+        scaleY: scale * 0.96,
+        duration: 420 + index * 35,
+        delay: 220 + index * 40,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    });
+
+    const birdTexture = this.getAnimalEmotionTexture(3, "celebrating");
+    if (birdTexture) {
+      const source = this.textures.get(birdTexture)?.getSourceImage?.();
+      const birdScale = Phaser.Math.Clamp(156 / Math.max(source?.width || 260, source?.height || 260), 0.22, 0.62);
+      const birdHalfWidth = Math.max(18, (source?.width || 260) * birdScale * 0.5 + 8);
+      const birdLeftX = GRID_OFFSET_X + birdHalfWidth;
+      const birdRightX = GRID_OFFSET_X + GRID_WIDTH_PX - birdHalfWidth;
+      const bird = this.add.image(birdLeftX, centerY - 152, birdTexture)
+        .setDepth(DEPTH.ui - 1)
+        .setScale(birdScale)
+        .setAngle(-9)
+        .setAlpha(0);
+      this.totalWinCelebrants.push(bird);
+      this.tweens.add({
+        targets: bird,
+        alpha: 1,
+        duration: 240,
+        ease: "Quad.easeOut",
+      });
+      this.tweens.add({
+        targets: bird,
+        x: birdRightX,
+        y: centerY - 176,
+        angle: 9,
+        scaleX: birdScale * 1.08,
+        scaleY: birdScale * 0.94,
+        duration: 1900,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      this.totalWinCelebrationTimers.push(this.time.addEvent({
+        delay: 520,
+        startAt: 240,
+        loop: true,
+        callback: () => this.spawnBirdCelebrationConfetti(bird),
+      }));
+    }
+
+    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc];
+    for (let index = 0; index < 32; index += 1) {
+      const confetti = this.add.rectangle(
+        centerX + Phaser.Math.Between(-260, 260),
+        centerY + Phaser.Math.Between(-150, 54),
+        Phaser.Math.Between(5, 10),
+        Phaser.Math.Between(10, 18),
+        confettiColors[index % confettiColors.length],
+        0.96
+      ).setDepth(DEPTH.ui + 2).setAngle(Phaser.Math.Between(-40, 40));
+      this.totalWinCelebrants.push(confetti);
+      this.tweens.add({
+        targets: confetti,
+        y: confetti.y + Phaser.Math.Between(170, 310),
+        x: confetti.x + Phaser.Math.Between(-85, 85),
+        angle: confetti.angle + Phaser.Math.Between(180, 540),
+        alpha: 0.16,
+        duration: Phaser.Math.Between(1050, 1850),
+        delay: index * 24,
+        repeat: -1,
+        repeatDelay: Phaser.Math.Between(140, 500),
+        yoyo: false,
+        ease: "Sine.easeIn",
+        onRepeat: () => confetti.setPosition(
+          centerX + Phaser.Math.Between(-260, 260),
+          centerY + Phaser.Math.Between(-150, 54)
+        ).setAlpha(0.96),
+      });
+    }
+  }
+
+  spawnBirdCelebrationConfetti(bird) {
+    if (!bird?.active) return;
+    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc];
+    for (let index = 0; index < 7; index += 1) {
+      const confetti = this.add.rectangle(
+        bird.x + Phaser.Math.Between(-18, 18),
+        bird.y + Phaser.Math.Between(8, 24),
+        Phaser.Math.Between(4, 8),
+        Phaser.Math.Between(8, 14),
+        confettiColors[Phaser.Math.Between(0, confettiColors.length - 1)],
+        0.96
+      ).setDepth(DEPTH.ui + 2).setAngle(Phaser.Math.Between(-45, 45));
+      this.totalWinCelebrants.push(confetti);
+      this.tweenPromise({
+        targets: confetti,
+        x: confetti.x + Phaser.Math.Between(-70, 70),
+        y: confetti.y + Phaser.Math.Between(105, 180),
+        angle: confetti.angle + Phaser.Math.Between(180, 540),
+        alpha: 0,
+        duration: Phaser.Math.Between(640, 1050),
+        ease: "Quad.easeIn",
+        onComplete: () => confetti.destroy(),
+      });
+    }
+  }
+
+  async presentOuchTotalWinSequence(totalWin = 0, ouchEvent = {}) {
     const grandTotal = this.clampToWinCap(totalWin);
     const overlay = this.ouchFadeOverlay;
     const fromBlack = overlay?.visible && overlay.alpha > 0.5;
@@ -3299,15 +4192,20 @@ export class GameScene extends Phaser.Scene {
       this.ouchFoot?.destroy();
       this.ouchFoot = null;
     }
+    this.startTotalWinCelebration();
 
     this.currentWin = 0;
     this.countUpLabel = "TOTAL WIN";
-    this.totalWinTitleText?.setVisible(true).setAlpha(1);
     const layout = this.layoutTotalWinTexts();
-    this.countUpText
-      ?.setAlpha(1)
+    const trapPower = Math.max(0, Number(ouchEvent.trapPower ?? this.trapMeterState?.power) || 0);
+    const multiplier = Math.max(1, Number(ouchEvent.finalMultiplier ?? this.getActiveDamageMultiplier()) || 1);
+    this.totalWinTitleText?.setVisible(false);
+    this.countUpText?.setVisible(false);
+    this.totalWinFormulaText
+      ?.setText(`${trapPower.toFixed(2)}  ×  x${multiplier}`)
+      .setAlpha(0)
+      .setScale(0.72)
       .setVisible(true);
-    this.syncCountUpDisplay(0);
 
     if (fromBlack) {
       await this.tweenPromise({
@@ -3319,6 +4217,27 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    await this.tweenPromise({
+      targets: this.totalWinFormulaText,
+      alpha: 1,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      duration: 210,
+      ease: "Back.easeOut",
+    });
+    await this.tweenPromise({
+      targets: this.totalWinFormulaText,
+      scaleX: 0.9,
+      scaleY: 0.9,
+      alpha: 0,
+      duration: 230,
+      delay: 260,
+      ease: "Quad.easeIn",
+      onComplete: () => this.totalWinFormulaText?.setVisible(false),
+    });
+    this.totalWinTitleText?.setVisible(true).setAlpha(1);
+    this.countUpText?.setAlpha(1).setVisible(true);
+    this.syncCountUpDisplay(0);
     const popScale = layout.amountScale * 1.08;
     await this.tweenPromise({
       targets: this.countUpText,
@@ -3356,6 +4275,7 @@ export class GameScene extends Phaser.Scene {
       this.tweenPromise({ targets: fadeTargets, alpha: 0, duration: 340, ease: "Quad.easeInOut" }),
       this.tweenPromise({ targets: this.totalWinBackground, alpha: 1, duration: 420, ease: "Quad.easeInOut" }),
     ]);
+    this.startTotalWinCelebration();
 
     this.currentWin = 0;
     this.countUpLabel = "TOTAL WIN";
@@ -3396,14 +4316,25 @@ export class GameScene extends Phaser.Scene {
     const centerX = impact?.bounds?.centerX || (GRID_OFFSET_X + GRID_WIDTH_PX / 2);
     const centerY = (impact?.impactY || GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.55) + CELL_SIZE * 0.1;
 
+    const targetIndex = stepNumber > 1
+      ? (this.damageMeterActiveIndex ?? 0) + 1
+      : (this.damageMeterActiveIndex ?? 0);
+
     if (stepNumber > 1) {
-      await this.advanceDamageMeterForOuchStep();
       await this.presentOuchDamageMeterCharge(stepNumber, stepIntervalMs);
+      await this.presentOuchTrapStruggle(stepNumber, impact);
+      await this.moveOuchLadderFootToIndex(targetIndex, {
+        fast: this.fastForwardRequested,
+      });
+      await this.advanceDamageMeterForOuchStep();
       await this.presentOuchDrawSuccess(this.damageMeterActiveIndex ?? 0);
-      await this.presentOuchFootPushDown(impact);
       await this.pulseDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     } else {
       await this.presentOuchDamageMeterCharge(stepNumber, 260);
+      await this.presentOuchTrapStruggle(stepNumber, impact);
+      await this.moveOuchLadderFootToIndex(targetIndex, {
+        fast: this.fastForwardRequested,
+      });
       await this.presentOuchDrawSuccess(this.damageMeterActiveIndex ?? 0);
     }
 
@@ -3439,11 +4370,12 @@ export class GameScene extends Phaser.Scene {
       remainingSegments: damageWheel.remainingSegments || damageWheel.segments || DEFAULT_DAMAGE_METER_SEGMENTS,
     });
     this.setDamageMeterBankedCount(catchUpIndex);
+    this.ouchTrapPowerMultiplierIndex = Math.max(0, catchUpIndex - 1);
     this.updateTrapPowerMeter(ouchEvent.trapPower || gameState.trapMeter?.power || 0);
     this.setOuchUiVisible(true);
     this.currentWin = 0;
     this.syncCountUpDisplay(0);
-    this.countUpText?.setVisible(true);
+    this.countUpText?.setVisible(false);
 
     const bounds = this.getOuchStompBounds();
     const impact = await this.presentOuchStompImpact(bounds);
@@ -3468,9 +4400,11 @@ export class GameScene extends Phaser.Scene {
       await this.presentOuchMaxDepthReveal();
     } else {
       await this.presentOuchStompStopReveal(finalIndex);
+      await this.presentOuchTrapRecoil();
     }
     await this.waitForPresentation(220, { skippable: true });
     await this.presentOuchLegPullExit(impact);
+    this.destroyOuchTrapRig();
     const cappedTotal = this.clampToWinCap(
       gameState.twa || ouchEvent.finalWinAmount || this.currentWin
     );
@@ -3480,7 +4414,7 @@ export class GameScene extends Phaser.Scene {
     if (hitWinCap) {
       await this.presentWinCapSequence(cappedTotal);
     } else {
-      await this.presentOuchTotalWinSequence(cappedTotal);
+      await this.presentOuchTotalWinSequence(cappedTotal, ouchEvent);
     }
   }
 
@@ -3666,6 +4600,7 @@ export class GameScene extends Phaser.Scene {
     const impactY = bounds.centerY + CELL_SIZE * 0.08;
     const slamY = impactY + CELL_SIZE * 0.1;
     const holdY = impactY - CELL_SIZE * 0.42;
+    const fearRevealY = impactY - CELL_SIZE * 1.35;
     const foot = this.add.image(bounds.centerX, startY, "giantfoot")
       .setDepth(DEPTH.stomp)
       .setScale(footScale * 0.78, footScale * 0.9)
@@ -3673,10 +4608,25 @@ export class GameScene extends Phaser.Scene {
 
     await this.tweenPromise({
       targets: foot,
+      y: fearRevealY,
+      scaleX: footScale * 0.92,
+      scaleY: footScale * 0.96,
+      duration: 200,
+      ease: "Quad.easeIn",
+    });
+
+    // Change before the final drop so even the animals under the foot get a readable scared beat.
+    await this.crossfadeAnimalEmotion("scared", {
+      duration: this.fastForwardRequested ? 45 : 100,
+    });
+    await this.waitForPresentation(this.fastForwardRequested ? 30 : 120, { skippable: true });
+
+    await this.tweenPromise({
+      targets: foot,
       y: slamY,
       scaleX: footScale * 1.02,
       scaleY: footScale * 1.03,
-      duration: 260,
+      duration: 90,
       ease: "Quad.easeIn",
     });
 
@@ -3708,6 +4658,8 @@ export class GameScene extends Phaser.Scene {
         await this.presentAnimalKillAngerOvercharge();
       }
     }
+
+    await this.resolveAnimalAngerMood(bonusTriggered);
 
     await this.tweenPromise({
       targets: foot,
@@ -4066,7 +5018,14 @@ export class GameScene extends Phaser.Scene {
 
     await this.showCrushGiantBackground(520);
     const fast = this.fastForwardRequested;
-    await this.waitForPresentation(Number(crushEvent.teaseMs) || 700, { skippable: !fast });
+    await this.waitForPresentation(
+      fast ? 90 : Math.max(750, Number(crushEvent.teaseMs) || 700),
+      { skippable: !fast }
+    );
+    await this.crossfadeAnimalEmotion("scared", {
+      duration: this.fastForwardRequested ? 45 : 120,
+    });
+    await this.waitForPresentation(fast ? 40 : 120, { skippable: !fast });
     await this.waitForPresentation(Number(crushEvent.pauseMs) || 350, { skippable: !fast });
 
     let openHand = null;
@@ -4116,6 +5075,7 @@ export class GameScene extends Phaser.Scene {
     if (crushEvent.bonusTriggered) {
       await this.presentAnimalKillAngerOvercharge();
     }
+    await this.resolveAnimalAngerMood(crushEvent.bonusTriggered);
   }
 
   setBonusUiVisible(visible) {
@@ -4132,6 +5092,8 @@ export class GameScene extends Phaser.Scene {
 
   setAngerUiVisible(visible) {
     this.angerLabel?.setVisible(visible);
+    this.angerMeterCaption?.setVisible(visible);
+    this.angerBonusBadge?.setVisible(visible);
     this.angerSegments?.forEach((segment) => segment.setVisible(visible));
   }
 
@@ -4144,7 +5106,7 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterStatusText?.setVisible(visible && Boolean(this.damageMeterStatusText?.text));
     this.trapPowerText?.setVisible(visible);
     this.trapPowerMultiplierText?.setVisible(visible && Boolean(this.trapPowerMultiplierText?.text));
-    this.countUpText?.setVisible(visible);
+    this.countUpText?.setVisible(false);
     if (visible) {
       this.layoutOuchHud();
     }
@@ -4161,9 +5123,12 @@ export class GameScene extends Phaser.Scene {
       if (active) {
         segment.clearTint();
         segment.setAlpha(1);
+        this.lifeLabels?.[index]?.setAlpha(1).clearTint();
       } else {
-        segment.setTint(0x27303f);
-        segment.setAlpha(0.4);
+        // Spent sockets should read as unavailable, not disappear into the bonus background.
+        segment.setTint(0x77839a);
+        segment.setAlpha(0.74);
+        this.lifeLabels?.[index]?.setTint(0xa7b3ca).setAlpha(0.82);
       }
       if (!changed) return;
       pops.push(this.tweenPromise({
@@ -4217,7 +5182,9 @@ export class GameScene extends Phaser.Scene {
 
   getActiveDamageMultiplier() {
     const multiplier = Number(this.getActiveDamageMultiplierEntry()?.value);
-    return Number.isFinite(multiplier) ? multiplier : null;
+    // The authored wheel begins at x1; never expose an empty/zero multiplier
+    // while the bonus UI is initializing.
+    return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
   }
 
   getDamageMultiplierCssColor(entry = this.getActiveDamageMultiplierEntry()) {
@@ -4227,14 +5194,41 @@ export class GameScene extends Phaser.Scene {
   }
 
   layoutTrapPowerTexts(power = 0, multiplier = this.getActiveDamageMultiplier()) {
-    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
-    const y = GRID_OFFSET_Y + GRID_HEIGHT_PX + 94 + this.getOuchUiYOffset();
-    const powerLabel = `TRAP POWER ${Math.max(0, Number(power) || 0).toFixed(2)}`;
+    let centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    // In the pit scene, keep the live calculation close to the DEEPER cue
+    // instead of down in the generic HUD band.
+    const ouchLift = this.isPostBonusOuch ? 54 : 0;
+    let y = GRID_OFFSET_Y + GRID_HEIGHT_PX + 94 + this.getOuchUiYOffset() - ouchLift;
+    if (this.isPostBonusOuch && this.ouchFoot?.active) {
+      const footWidth = this.ouchTrapImpact?.footWidth || CELL_SIZE * 2;
+      centerX = Phaser.Math.Clamp(
+        this.ouchFoot.x + footWidth * 0.76,
+        GRID_OFFSET_X + GRID_WIDTH_PX * 0.66,
+        GRID_OFFSET_X + GRID_WIDTH_PX - 42
+      );
+      y = this.ouchFoot.y + 8;
+    }
+    const powerLabel = Math.max(0, Number(power) || 0).toFixed(2);
     const visible = this.isBonusUiVisible || this.isPostBonusOuch;
+    const heldOuchMultiplier = this.isPostBonusOuch
+      ? Number(this.damageMeterEntries?.[this.ouchTrapPowerMultiplierIndex]?.value)
+      : NaN;
+    // A missing ladder entry used to coerce to 0 and render "x0" while the
+    // foot/arrow was already on a valid multiplier rung. Only accept positive
+    // wheel values; otherwise use the active multiplier (which is at least x1).
+    const activeMultiplier = Number(multiplier);
+    const displayMultiplier = Number.isFinite(heldOuchMultiplier) && heldOuchMultiplier > 0
+      ? heldOuchMultiplier
+      : (Number.isFinite(activeMultiplier) && activeMultiplier > 0 ? activeMultiplier : 1);
+
+    const isOuchHud = this.isPostBonusOuch;
+    this.trapPowerText?.setFontSize(isOuchHud ? "25px" : "16px");
+    this.trapPowerMultiplierText?.setFontSize(isOuchHud ? "23px" : "16px");
 
     this.trapPowerText?.setText(powerLabel);
-    if (multiplier === null || !this.trapPowerMultiplierText) {
+    if (displayMultiplier === null || !this.trapPowerMultiplierText) {
       this.trapPowerMultiplierText?.setVisible(false);
+      this.syncTrapPowerMultiplierPulse(false);
       this.trapPowerText
         ?.setOrigin(0.5, 0.5)
         .setPosition(centerX, y)
@@ -4242,8 +5236,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    const multiplierLabel = ` x ${multiplier}`;
-    const multiplierColor = this.getDamageMultiplierCssColor();
+    const multiplierLabel = `x${displayMultiplier}`;
+    const multiplierColor = this.getDamageMultiplierCssColor(
+      this.damageMeterEntries?.[this.ouchTrapPowerMultiplierIndex] || this.getActiveDamageMultiplierEntry()
+    );
     this.trapPowerMultiplierText
       .setText(multiplierLabel)
       .setColor(multiplierColor);
@@ -4251,7 +5247,11 @@ export class GameScene extends Phaser.Scene {
     const powerWidth = this.trapPowerText.width;
     const multiplierWidth = this.trapPowerMultiplierText.width;
     const totalWidth = powerWidth + multiplierWidth;
-    const startX = centerX - (totalWidth / 2);
+    // In Ouch, keep the enlarged calculation aligned to the right of the
+    // giant rather than centering it over the old bonus HUD position.
+    const startX = isOuchHud
+      ? GRID_OFFSET_X + GRID_WIDTH_PX + 12 - totalWidth
+      : centerX - (totalWidth / 2);
 
     this.trapPowerText
       .setOrigin(0, 0.5)
@@ -4261,6 +5261,26 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setPosition(startX + powerWidth, y)
       .setVisible(visible);
+    this.syncTrapPowerMultiplierPulse(visible && this.isBonusUiVisible);
+  }
+
+  syncTrapPowerMultiplierPulse(shouldPulse = false) {
+    if (!shouldPulse || !this.trapPowerMultiplierText?.visible) {
+      this.trapPowerMultiplierPulse?.stop();
+      this.trapPowerMultiplierPulse = null;
+      this.trapPowerMultiplierText?.setAlpha(1).setAngle(0);
+      return;
+    }
+    if (this.trapPowerMultiplierPulse?.isPlaying) return;
+    this.trapPowerMultiplierText.setAlpha(1).setAngle(-1.15);
+    this.trapPowerMultiplierPulse = this.tweens.add({
+      targets: this.trapPowerMultiplierText,
+      angle: 1.15,
+      duration: 1050,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
   }
 
   async bopTrapPowerDisplay() {
@@ -4717,14 +5737,14 @@ export class GameScene extends Phaser.Scene {
     this.angerMeterState = { count, max };
     await Promise.all(this.angerSegments.map((segment, index) => {
       const active = index < litCount;
-      const heat = litCount / max;
       let fillColor = 0x341912;
       if (active) {
+        const rage = max <= 1 ? 1 : index / (max - 1);
         const blended = Phaser.Display.Color.Interpolate.ColorWithColor(
-          Phaser.Display.Color.ValueToColor(0xe55328),
-          Phaser.Display.Color.ValueToColor(0xff2a00),
+          Phaser.Display.Color.ValueToColor(0xe34a2d),
+          Phaser.Display.Color.ValueToColor(0x5b0b12),
           100,
-          Math.round(heat * 100)
+          Math.round(rage * 100)
         );
         fillColor = Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b);
       }
@@ -4736,7 +5756,7 @@ export class GameScene extends Phaser.Scene {
       }
       const popScale = angerMeter.explode && index === litCount - 1
         ? { x: 1.34, y: 1.42 }
-        : { x: 1.14 + heat * 0.08, y: 1.22 + heat * 0.1 };
+        : { x: 1.14 + (litCount / max) * 0.08, y: 1.22 + (litCount / max) * 0.1 };
       return this.tweenPromise({
         targets: segment,
         scaleX: popScale.x,
@@ -4747,6 +5767,12 @@ export class GameScene extends Phaser.Scene {
       });
     }));
     this.syncAngerBlink(count, max);
+    this.syncAngerBonusBadge(count, max);
+    if (count >= ANGER_SEGMENT_COUNT - 1 && this.animalEmotion !== "angry") {
+      await this.crossfadeAnimalEmotion("angry", {
+        duration: this.fastForwardRequested ? 50 : 150,
+      });
+    }
   }
 
   syncCountUpDisplay(value = this.currentWin) {
@@ -4755,6 +5781,10 @@ export class GameScene extends Phaser.Scene {
     if (this.totalWinTitleText?.visible) {
       this.countUpText.setText(amount.toFixed(2));
       this.countUpText.setVisible(true);
+      return;
+    }
+    if (this.isPostBonusOuch) {
+      this.countUpText.setVisible(false);
       return;
     }
     this.countUpText.setText(`${this.countUpLabel || "WIN"} ${amount.toFixed(2)}`);
@@ -4771,6 +5801,7 @@ export class GameScene extends Phaser.Scene {
     const bottom = GRID_OFFSET_Y + GRID_HEIGHT_PX;
     this.countUpLabel = "WIN";
     this.totalWinTitleText?.setVisible(false);
+    this.totalWinFormulaText?.setVisible(false);
     this.countUpText
       ?.setPosition(centerX, bottom + 46)
       .setFontSize("30px")
@@ -4820,6 +5851,7 @@ export class GameScene extends Phaser.Scene {
 
   resetAngerMeter() {
     this.stopAngerBlink();
+    this.stopAngerBonusPulse();
     this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
     this.angerSegments?.forEach((segment) => {
       segment.setFillStyle(0x341912, 0.9);
@@ -4827,6 +5859,8 @@ export class GameScene extends Phaser.Scene {
       segment.setScale(1, 1);
       segment.setAlpha(1);
     });
+    this.syncAngerBonusBadge(0, ANGER_SEGMENT_COUNT);
+    this.animalEmotion = "normal";
   }
 
   resetForNewSpin() {
@@ -4835,6 +5869,8 @@ export class GameScene extends Phaser.Scene {
     this.resetCountUpPresentation();
     this.syncCountUpDisplay(0);
     this.clearStompLandedCoins();
+    this.clearTotalWinCelebration();
+    this.animalEmotion = "normal";
     this.clearPendingFastForward();
   }
 
@@ -4904,6 +5940,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.isInBonusMode && !this.isPostBonusOuch) return;
     this.isInBonusMode = false;
     this.isPostBonusOuch = false;
+    this.ouchTrapPowerMultiplierIndex = null;
     this.resetBonusIntroScene();
     this.hideFreespinCounter();
     this.setBonusUiVisible(false);
@@ -4913,6 +5950,7 @@ export class GameScene extends Phaser.Scene {
     this.stopOuchTheme();
     this.ouchFoot?.destroy();
     this.ouchFoot = null;
+    this.destroyOuchTrapRig();
     this.ouchFadeOverlay?.destroy();
     this.ouchFadeOverlay = null;
     this.resetOuchPitScroll();

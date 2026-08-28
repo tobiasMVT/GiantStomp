@@ -31,6 +31,18 @@ export function queueGameSceneAssets(load, _deps = {}) {
   Object.entries(animalDollSymbols).forEach(([symbolId, filename]) => {
     load.image(`${symbolId}_doll`, `assets/giantstomp/bonus symbol/${filename}`);
   });
+  const animalEmotionAssets = {
+    1: { angry: "arg_kanin.png", scared: "scared_kanin.png", celebrating: "celebrating_kanin.png" },
+    2: { angry: "arg_ekorre.png", scared: "scared_ekorre.png", celebrating: "celebrating_ekorre.png" },
+    3: { angry: "arg_bird.png", scared: "scared_bird.png", celebrating: "celebrating_bird.png" },
+    4: { angry: "arg_igelkott.png", scared: "scared_igelkott.png", celebrating: "celebrating_igelkott.png" },
+    5: { angry: "arg_mullvad.png", scared: "scared_mullvad.png", celebrating: "celebrating_mullvad.png" },
+  };
+  Object.entries(animalEmotionAssets).forEach(([symbolId, emotions]) => {
+    load.image(`animal_${symbolId}_angry`, `assets/giantstomp/emotions/angry/${emotions.angry}`);
+    load.image(`animal_${symbolId}_scared`, `assets/giantstomp/emotions/scared/${emotions.scared}`);
+    load.image(`animal_${symbolId}_celebrating`, `assets/giantstomp/emotions/celebratinng/${emotions.celebrating}`);
+  });
   const bonusSymbols = {
     111: "111_wood.png",
     222: "222_rope.png",
@@ -65,6 +77,9 @@ export function queueGameSceneAssets(load, _deps = {}) {
   load.image("reel_frame", "assets/giantstomp/reel_frame.png");
   load.image("damage_meter_ladder", "assets/giantstomp/meter/ladder_horsiontal.png");
   load.image("damage_meter_foot", "assets/giantstomp/meter/foot_arrow_poiting_right_vertical_ladder.png");
+  load.image("ouch_damage_meter_ladder", "assets/giantstomp/meter/vertical ladder.png");
+  load.image("ouch_damage_meter_foot", "assets/giantstomp/meter/foot_arrow_poiting_right.png");
+  load.image("ouch_snared_foot", "assets/giantstomp/ouch_gear/snared_foot.png");
   load.image("bonus_background", "assets/giantstomp/background_bonus.png");
   load.image("bonus_torch_height", "assets/giantstomp/bonus_torch_effect/background_bonus_height.png");
   load.image("bonus_torch_normal", "assets/giantstomp/bonus_torch_effect/background_bonus_normal_opengl.png");

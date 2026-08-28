@@ -41,6 +41,50 @@ const OUCH_BACKGROUND_SCALE = 1.2;
 const OUCH_STOMP_OFFSET_X = 50;
 const OUCH_PIT_STEP_DELTA_Y = 88;
 const OUCH_UI_OFFSET_Y = 50;
+// Post-bonus pit ladder art, tuned in the ?ouchLayout=1 scene against ouch_background.
+const OUCH_METER_LADDER_SIZE = { width: 172, height: 860 };
+const OUCH_METER_LADDER_TUNING = {
+  artCenterX: 1,
+  artCenterY: 752,
+  artWidth: 110,
+  artHeight: 670,
+  guideCenterX: 78,
+  guideCenterY: 773,
+  guideWidth: 60,
+  stepGap: 52,
+  footPullPerStep: 52,
+};
+
+const getOuchDamageMeterLadderLayout = (segmentCount) => {
+  const tuning = OUCH_METER_LADDER_TUNING;
+  const scale = tuning.artHeight / OUCH_METER_LADDER_SIZE.height;
+  const centerX = tuning.artCenterX;
+  const centerY = tuning.artCenterY;
+  const leftX = tuning.guideCenterX - tuning.guideWidth / 2;
+  const topY = tuning.guideCenterY - (tuning.stepGap * (segmentCount - 1)) / 2;
+  const slots = Array.from({ length: segmentCount }, (_, index) => {
+    const y = topY + index * tuning.stepGap;
+    return {
+      x: leftX - 24,
+      y,
+      footY: y,
+    };
+  });
+  return {
+    centerX,
+    centerY,
+    leftX,
+    topY,
+    scale,
+    artWidth: tuning.artWidth,
+    artHeight: tuning.artHeight,
+    stepGap: tuning.stepGap,
+    footPullPerStep: tuning.footPullPerStep,
+    numberX: tuning.artCenterX + tuning.artWidth / 2 + 8,
+    slots,
+    startY: slots[0]?.y - tuning.stepGap,
+  };
+};
 
 const getReelFrameScale = (source) => {
   const innerW = source.width * REEL_FRAME_INNER_NORM.width;
@@ -153,4 +197,7 @@ export {
   OUCH_STOMP_OFFSET_X,
   OUCH_PIT_STEP_DELTA_Y,
   OUCH_UI_OFFSET_Y,
+  OUCH_METER_LADDER_SIZE,
+  OUCH_METER_LADDER_TUNING,
+  getOuchDamageMeterLadderLayout,
 };
