@@ -2664,17 +2664,17 @@ export class GameScene extends Phaser.Scene {
     return Promise.all(sparks);
   }
 
-  launchAngerMeterOrb(fromX, fromY, target, delay = 0) {
-    const colors = [0xff5a1f, 0xff8f3f, 0xff2d00];
-    const orb = this.add.circle(fromX, fromY, Phaser.Math.Between(4, 7), colors[0], 0.92)
+  launchAngerMeterOrb(fromX, fromY, target, delay = 0, { lead = false } = {}) {
+    const colors = lead ? [0xfff0a1, 0xff7b22, 0x7a1209] : [0xff5a1f, 0xff8f3f, 0xff2d00];
+    const orb = this.add.circle(fromX, fromY, lead ? 9 : Phaser.Math.Between(4, 7), colors[0], 0.96)
       .setDepth(DEPTH.angerVfx)
       .setBlendMode(Phaser.BlendModes.ADD);
     const stopTrail = this.attachMotionTrail(orb, {
-      color: colors[1],
-      radius: Phaser.Math.Between(3, 5),
+      color: lead ? 0xffc04e : colors[1],
+      radius: lead ? 7 : Phaser.Math.Between(3, 5),
       depth: DEPTH.angerVfx,
-      intervalMs: 14,
-      fadeMs: 200,
+      intervalMs: lead ? 10 : 14,
+      fadeMs: lead ? 280 : 200,
     });
     const curve = new Phaser.Curves.QuadraticBezier(
       new Phaser.Math.Vector2(fromX, fromY),
@@ -2691,11 +2691,11 @@ export class GameScene extends Phaser.Scene {
       targets: travel,
       t: 1,
       delay,
-      duration: Phaser.Math.Between(360, 460),
+      duration: lead ? 430 : Phaser.Math.Between(360, 460),
       ease: "Cubic.easeInOut",
       onUpdate: () => {
         curve.getPoint(travel.t, point);
-        orb.setPosition(point.x, point.y).setScale(0.8 + travel.t * 0.7);
+        orb.setPosition(point.x, point.y).setScale((lead ? 1 : 0.8) + travel.t * (lead ? 0.9 : 0.7));
         orb.setFillStyle(colors[travel.t > 0.65 ? 2 : 1], 0.95 - travel.t * 0.2);
       },
       onComplete: () => {
@@ -2705,13 +2705,99 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  createAngerMeterArc(fromX, fromY, target) {
+    const controlX = (fromX + target.x) * 0.5 + Phaser.Math.Between(-18, 18);
+    const controlY = fromY + (target.y - fromY) * 0.42 - Phaser.Math.Between(40, 78);
+    const curve = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(fromX, fromY),
+      new Phaser.Math.Vector2(controlX, controlY),
+      new Phaser.Math.Vector2(target.x, target.y)
+    );
+    const glow = this.add.graphics().setDepth(DEPTH.angerVfx - 1).setBlendMode(Phaser.BlendModes.ADD);
+    const core = this.add.graphics().setDepth(DEPTH.angerVfx).setBlendMode(Phaser.BlendModes.ADD);
+    const points = curve.getPoints(22);
+    glow.lineStyle(10, 0xff4d1d, 0.22);
+    core.lineStyle(3, 0xffd166, 0.92);
+    [glow, core].forEach((graphic) => {
+      graphic.beginPath();
+      graphic.moveTo(points[0].x, points[0].y);
+      points.slice(1).forEach((point) => graphic.lineTo(point.x, point.y));
+      graphic.strokePath();
+    });
+    this.tweenPromise({
+      targets: [glow, core],
+      alpha: 0,
+      delay: 210,
+      duration: 260,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        glow.destroy();
+        core.destroy();
+      },
+    });
+  }
+
+  async presentAngerMeterCollectConfirm(target) {
+    const flash = this.add.circle(target.x, target.y, 10, 0xfff3b0, 0.95)
+      .setDepth(DEPTH.angerVfx + 1)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const ring = this.add.circle(target.x, target.y, 8, 0xff7a22, 0)
+      .setStrokeStyle(4, 0xffd166, 1)
+      .setDepth(DEPTH.angerVfx + 1)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const label = this.add.text(target.x, target.y - 16, "ANGER +1", {
+      fontFamily: "Arial Black, Arial, sans-serif",
+      fontSize: "13px",
+      color: "#fff0a6",
+      stroke: "#7a1209",
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(DEPTH.angerVfx + 2).setBlendMode(Phaser.BlendModes.ADD);
+    const sparks = this.spawnAngerImpactSpark(target.x, target.y, { weak: false });
+    this.cameras.main.shake(75, 0.0035);
+    await Promise.all([
+      sparks,
+      this.tweenPromise({
+        targets: flash,
+        scaleX: 3.1,
+        scaleY: 3.1,
+        alpha: 0,
+        duration: 210,
+        ease: "Quad.easeOut",
+        onComplete: () => flash.destroy(),
+      }),
+      this.tweenPromise({
+        targets: ring,
+        radius: 30,
+        alpha: 0,
+        duration: 280,
+        ease: "Cubic.easeOut",
+        onComplete: () => ring.destroy(),
+      }),
+      this.tweenPromise({
+        targets: label,
+        y: target.y - 42,
+        scaleX: 1.18,
+        scaleY: 1.18,
+        alpha: 0,
+        duration: 420,
+        ease: "Cubic.easeOut",
+        onComplete: () => label.destroy(),
+      }),
+    ]);
+  }
+
   async launchAngerMeterStream(fromX, fromY, targetSegmentIndex = 0, { weak = false, orbStagger = 38 } = {}) {
     const target = this.getAngerSegmentTarget(targetSegmentIndex);
     const streamCount = weak ? 3 : 4;
+    if (!weak) this.createAngerMeterArc(fromX, fromY, target);
     await Promise.all(Array.from({ length: streamCount }, (_, index) => (
-      this.launchAngerMeterOrb(fromX, fromY, target, index * orbStagger)
+      this.launchAngerMeterOrb(fromX, fromY, target, index * orbStagger, { lead: !weak && index === 0 })
     )));
-    await this.spawnAngerImpactSpark(target.x, target.y, { weak });
+    if (weak) {
+      await this.spawnAngerImpactSpark(target.x, target.y, { weak: true });
+    } else {
+      await this.presentAngerMeterCollectConfirm(target);
+    }
   }
 
   async launchAngerMeterForKill(fromX, fromY, killEvent = {}) {
