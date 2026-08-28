@@ -26,7 +26,15 @@ All board actions then use the same optional scatter/Anger presentation, reveal 
 - `damageMeterState`: configured, removed, and remaining segments rendered by the damage meter
 - `isPostBonusOuch` / `ouchScrollY`: pit descent offset during trap resolution
 - `isInBonusMode`: background/music mode only
+- `mainGameSpeedSettingIndex`: selected presentation speed (`1.5x`, `2x`, or `3x`)
 - `presentationWaits` / `activeTweens`: fast-forward cleanup
 - `layoutSnapshot`: responsive camera projection supplied by the framework
 
 No house, Angel, demon combat, loot, chest, portal, mystery, bee, merge-gun, or collect-phase presentation remains in the client code.
+
+## Spin speed
+
+The minimal top-left fast-forward control uses drawn vector arrowheads. Its one, two, and
+three arrows select `+50%`, `+100%`, and `+200%` presentation speed respectively.
+`GameScene.tweenPromise` and `waitForPresentation` scale both main-game and bonus
+presentation durations without changing server math or the existing one-shot fast-forward behavior.

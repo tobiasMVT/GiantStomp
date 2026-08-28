@@ -141,6 +141,11 @@ const WIN_CAP = Math.max(0, Number(clientConfig.wincap) || 0);
 const SYMBOL_LAND_EASE = "Back.easeOut";
 const SYMBOL_LAND_EASE_PARAMS = [1.08];
 const OUCH_LAYOUT_TUNER_VALUES = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+const MAIN_GAME_SPEED_SETTINGS = [
+  { label: ">", multiplier: 1.5 },
+  { label: ">>", multiplier: 2 },
+  { label: ">>>", multiplier: 3 },
+];
 
 const getReel = (reels, reel) => reels?.[reel] ?? reels?.[String(reel)] ?? [];
 const getSymbol = (reels, reel, row) => getReel(reels, reel)?.[row] ?? null;
@@ -282,6 +287,9 @@ export class GameScene extends Phaser.Scene {
     };
     this.ouchLayoutTuner = null;
     this.ouchLayoutTunerKeyHandler = null;
+    this.mainGameSpeedSettingIndex = 0;
+    this.mainGameSpeedControl = [];
+    this.mainGameSpeedButton = null;
   }
 
   create() {
@@ -695,7 +703,81 @@ export class GameScene extends Phaser.Scene {
     ).setOrigin(0.5).setDepth(DEPTH.ui + 1);
     this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
 
+    this.createMainGameSpeedControl();
+
     this.createBonusUi();
+  }
+
+  createMainGameSpeedControl() {
+    const x = GRID_OFFSET_X + 14;
+    const y = GRID_OFFSET_Y - 42;
+    const graphic = this.add.graphics().setDepth(DEPTH.ui + 2);
+    const hitArea = this.add.rectangle(x + 20, y, 48, 28, 0x000000, 0.001)
+      .setDepth(DEPTH.ui + 1);
+
+    hitArea.setInteractive({ useHandCursor: true });
+
+    hitArea.on("pointerdown", () => this.cycleMainGameSpeed());
+    hitArea.on("pointerover", () => this.drawMainGameSpeedControl(true));
+    hitArea.on("pointerout", () => this.drawMainGameSpeedControl(false));
+    this.mainGameSpeedControl = [hitArea, graphic];
+    this.mainGameSpeedButton = graphic;
+    this.updateMainGameSpeedControl();
+  }
+
+  drawMainGameSpeedControl(hovered = false) {
+    const graphic = this.mainGameSpeedButton;
+    if (!graphic) return;
+    const x = GRID_OFFSET_X + 14;
+    const y = GRID_OFFSET_Y - 42;
+    const arrowCount = this.mainGameSpeedSettingIndex + 1;
+    const width = 40;
+    const height = 24;
+    const arrowWidth = 9;
+    const arrowGap = 2;
+    const groupWidth = arrowCount * arrowWidth + (arrowCount - 1) * arrowGap;
+    const startX = x + (width - groupWidth) / 2;
+    const iconColor = 0xffd783;
+
+    graphic.clear();
+    graphic.fillStyle(0x150f0c, hovered ? 0.7 : 0.45);
+    graphic.fillRoundedRect(x, y - height / 2, width, height, 8);
+    graphic.lineStyle(1, iconColor, hovered ? 0.8 : 0.48);
+    graphic.strokeRoundedRect(x + 0.5, y - height / 2 + 0.5, width - 1, height - 1, 8);
+    graphic.fillStyle(iconColor, hovered ? 1 : 0.82);
+    for (let index = 0; index < arrowCount; index += 1) {
+      const arrowX = startX + index * (arrowWidth + arrowGap);
+      graphic.fillTriangle(
+        arrowX,
+        y - 6,
+        arrowX + arrowWidth,
+        y,
+        arrowX,
+        y + 6
+      );
+    }
+  }
+
+  cycleMainGameSpeed() {
+    this.mainGameSpeedSettingIndex = (
+      this.mainGameSpeedSettingIndex + 1
+    ) % MAIN_GAME_SPEED_SETTINGS.length;
+    this.updateMainGameSpeedControl();
+  }
+
+  getMainGameSpeedMultiplier() {
+    return MAIN_GAME_SPEED_SETTINGS[this.mainGameSpeedSettingIndex]?.multiplier ?? 1;
+  }
+
+  updateMainGameSpeedControl() {
+    this.drawMainGameSpeedControl();
+    this.applyPresentationSpeedMultiplier();
+  }
+
+  applyPresentationSpeedMultiplier({ force = false } = {}) {
+    const speedMultiplier = this.getMainGameSpeedMultiplier();
+    if (this.time && (force || !this.fastForwardRequested)) this.time.timeScale = speedMultiplier;
+    if (this.tweens && (force || !this.fastForwardRequested)) this.tweens.timeScale = speedMultiplier;
   }
 
   createBonusIntroScene() {
@@ -2058,15 +2140,16 @@ export class GameScene extends Phaser.Scene {
     const sprites = this.reelSprites.flat().filter(Boolean);
     this.reelSprites = Array.from({ length: REELS }, () => Array(ROWS).fill(null));
     await Promise.all(sprites.map((sprite, index) => this.tweenPromise({
-      targets: sprite,
-      y: GRID_OFFSET_Y + GRID_HEIGHT_PX + CELL_SIZE * 1.5,
-      alpha: 0,
-      angle: Phaser.Math.Between(-7, 7),
-      duration: 280,
-      delay: index * 10,
-      ease: "Cubic.easeIn",
-      onComplete: () => sprite.destroy(),
-    })));
+        targets: sprite,
+        y: GRID_OFFSET_Y + GRID_HEIGHT_PX + CELL_SIZE * 1.5,
+        alpha: 0,
+        duration: 280,
+        delay: index * 10,
+        ease: "Cubic.easeIn",
+        onComplete: () => sprite.destroy(),
+      })));
+    // The new board is always normal; keep the previous emotion until its sprites have exited.
+    this.animalEmotion = "normal";
   }
 
   async dropSymbols(reels, { getTextureKey = null } = {}) {
@@ -3304,9 +3387,7 @@ export class GameScene extends Phaser.Scene {
       this.animalEmotion = "angry";
       return;
     }
-    if (this.animalEmotion !== "angry" && this.animalEmotion !== "scared") return;
-    await this.waitForPresentation(this.fastForwardRequested ? 40 : 360, { skippable: true });
-    await this.crossfadeAnimalEmotion("normal", { duration: this.fastForwardRequested ? 50 : 140 });
+    // Keep survivors scared/angry until the next spin removes their existing sprites.
   }
 
   async scrollOuchPit(deltaY = undefined, { fast = false } = {}) {
@@ -4036,13 +4117,21 @@ export class GameScene extends Phaser.Scene {
       { symbol: 2, x: -54, y: 134, tilt: 7 },
       { symbol: 4, x: 54, y: 134, tilt: -7 },
       { symbol: 5, x: 154, y: 126, tilt: 9 },
+      { symbol: 2, x: -112, y: 106, tilt: -5, crowdScale: 0.66 },
+      { symbol: 1, x: -38, y: 116, tilt: 5, crowdScale: 0.64 },
+      { symbol: 5, x: 38, y: 116, tilt: -5, crowdScale: 0.64 },
+      { symbol: 4, x: 112, y: 106, tilt: 5, crowdScale: 0.66 },
     ];
 
     partySlots.forEach((slot, index) => {
       const texture = this.getAnimalEmotionTexture(slot.symbol, "celebrating");
       if (!texture) return;
       const source = this.textures.get(texture)?.getSourceImage?.();
-      const scale = Phaser.Math.Clamp(148 / Math.max(source?.width || 260, source?.height || 260), 0.22, 0.62);
+      const scale = Phaser.Math.Clamp(
+        (148 / Math.max(source?.width || 260, source?.height || 260)) * (slot.crowdScale || 1),
+        0.15,
+        0.62
+      );
       const animal = this.add.image(centerX + slot.x, centerY + slot.y, texture)
         .setDepth(DEPTH.ui - 1)
         .setScale(scale)
@@ -5870,7 +5959,6 @@ export class GameScene extends Phaser.Scene {
     this.syncCountUpDisplay(0);
     this.clearStompLandedCoins();
     this.clearTotalWinCelebration();
-    this.animalEmotion = "normal";
     this.clearPendingFastForward();
   }
 
@@ -6015,7 +6103,9 @@ export class GameScene extends Phaser.Scene {
       let tween = null;
       tween = this.tweens.add({
         ...config,
-        duration: this.fastForwardRequested ? Math.min(45, Number(config.duration) || 0) : config.duration,
+        duration: this.fastForwardRequested
+          ? Math.min(45, Number(config.duration) || 0)
+          : config.duration,
         delay: this.fastForwardRequested ? 0 : config.delay,
         onComplete: (...args) => {
           this.activeTweens.delete(tween);
@@ -6057,19 +6147,18 @@ export class GameScene extends Phaser.Scene {
 
   requestFastForward() {
     this.fastForwardRequested = true;
-    this.time.timeScale = 5;
-    this.tweens.timeScale = 5;
+    const fastForwardScale = 5 * this.getMainGameSpeedMultiplier();
+    this.time.timeScale = fastForwardScale;
+    this.tweens.timeScale = fastForwardScale;
     this.cancelSkippablePresentationWaits();
     this.time.delayedCall(120, () => {
-      this.time.timeScale = 1;
-      this.tweens.timeScale = 1;
+      this.applyPresentationSpeedMultiplier({ force: true });
     });
   }
 
   clearPendingFastForward() {
     this.fastForwardRequested = false;
-    if (this.time) this.time.timeScale = 1;
-    if (this.tweens) this.tweens.timeScale = 1;
+    this.applyPresentationSpeedMultiplier();
   }
 
   playSfx(key, config = {}) {

@@ -176,8 +176,8 @@
   "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "stompEntry", "crushEntry"],
   "normal": {
     "noWin": 1,
-    "random": 5,
-    "bonusEntry": 10
+    "random": 6,
+    "bonusEntry": 0
   },
   "noWin": {
     "noWin": 1
