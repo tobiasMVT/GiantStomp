@@ -33,6 +33,9 @@ using the capped kill count (`0`→`6` in config). The client fakes a 10-step An
 meter: each kill can tick it using `angerMeterTickOdds`, but the display caps at step
 9 until bonus actually triggers, when step 10 is shown and the round latches bonus.
 Once bonus is latched, the round transitions immediately after the triggering spin.
+Feature resolution keeps at least one animal on the post-feature board and includes
+`angerReactorPositions` on stomp/crush events so the client can animate surviving
+animals reacting to each kill without changing the server's tick outcomes.
 
 ## Bonus cash game
 

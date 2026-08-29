@@ -30,9 +30,10 @@ The client accepts `spin`, `respin`, `bonustransition`, `freespin`, and `freeres
 A main-game spin moves the old board down and out, then stagger-drops a complete board from above. Ways wins highlight in place; symbols are not removed. Legacy `respin` / `freerespin` segments remain for compatibility but the server no longer emits those actions.
 
 Each newly landed scatter still animates, but bonus entry now comes from crushed animals.
-On stomp impact every crushed cell dies, bleeds, and drops coins together while anger
-embers fly in parallel; meter segments only fill on successful server ticks. Bonus entry
-then overcharges the meter one step at a time to 10 with streams from every kill point.
+On stomp impact every crushed cell dies, bleeds, and drops coins together. Surviving animals
+then react in anger and send one meter effect per crushed animal; meter segments only fill on
+successful server ticks. Bonus entry then overcharges the meter one step at a time to 10,
+with surviving animals repeatedly sending the remaining rage collections.
 Before the first freespin begins, `bonustransition` now detours through
 `bonus_intro.png`: the main game fades down into a full-scene animal war-room beat with
 a slow push-in, warm dusk glow, and blueprint sparkles, then fades onward into the

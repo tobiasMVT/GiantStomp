@@ -2644,7 +2644,7 @@ export class GameScene extends Phaser.Scene {
         x,
         y,
         Phaser.Math.Between(weak ? 2 : 3, weak ? 4 : 5),
-        weak ? 0xffa56a : 0xff8a3d,
+        weak ? 0xc92a2a : 0xff2424,
         weak ? 0.55 : 0.95
       )
         .setDepth(DEPTH.angerVfx)
@@ -2664,13 +2664,13 @@ export class GameScene extends Phaser.Scene {
     return Promise.all(sparks);
   }
 
-  launchAngerMeterOrb(fromX, fromY, target, delay = 0, { lead = false } = {}) {
-    const colors = lead ? [0xfff0a1, 0xff7b22, 0x7a1209] : [0xff5a1f, 0xff8f3f, 0xff2d00];
+  launchAngerMeterOrb(fromX, fromY, target, delay = 0, { lead = false, duration = null } = {}) {
+    const colors = lead ? [0xff5835, 0xe21a16, 0x59000a] : [0xd81d19, 0x8f0610, 0x2d0005];
     const orb = this.add.circle(fromX, fromY, lead ? 9 : Phaser.Math.Between(4, 7), colors[0], 0.96)
       .setDepth(DEPTH.angerVfx)
       .setBlendMode(Phaser.BlendModes.ADD);
     const stopTrail = this.attachMotionTrail(orb, {
-      color: lead ? 0xffc04e : colors[1],
+      color: lead ? 0xff2415 : colors[1],
       radius: lead ? 7 : Phaser.Math.Between(3, 5),
       depth: DEPTH.angerVfx,
       intervalMs: lead ? 10 : 14,
@@ -2691,7 +2691,7 @@ export class GameScene extends Phaser.Scene {
       targets: travel,
       t: 1,
       delay,
-      duration: lead ? 430 : Phaser.Math.Between(360, 460),
+      duration: duration || (lead ? 430 : Phaser.Math.Between(360, 460)),
       ease: "Cubic.easeInOut",
       onUpdate: () => {
         curve.getPoint(travel.t, point);
@@ -2716,8 +2716,8 @@ export class GameScene extends Phaser.Scene {
     const glow = this.add.graphics().setDepth(DEPTH.angerVfx - 1).setBlendMode(Phaser.BlendModes.ADD);
     const core = this.add.graphics().setDepth(DEPTH.angerVfx).setBlendMode(Phaser.BlendModes.ADD);
     const points = curve.getPoints(22);
-    glow.lineStyle(10, 0xff4d1d, 0.22);
-    core.lineStyle(3, 0xffd166, 0.92);
+    glow.lineStyle(12, 0xb40012, 0.34);
+    core.lineStyle(4, 0xff241d, 0.96);
     [glow, core].forEach((graphic) => {
       graphic.beginPath();
       graphic.moveTo(points[0].x, points[0].y);
@@ -2737,23 +2737,24 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  async presentAngerMeterCollectConfirm(target) {
-    const flash = this.add.circle(target.x, target.y, 10, 0xfff3b0, 0.95)
+  async presentAngerMeterCollectConfirm(target, { fast = false } = {}) {
+    const scale = fast ? 0.5 : 1;
+    const flash = this.add.circle(target.x, target.y, 10, 0xff2a24, 0.95)
       .setDepth(DEPTH.angerVfx + 1)
       .setBlendMode(Phaser.BlendModes.ADD);
-    const ring = this.add.circle(target.x, target.y, 8, 0xff7a22, 0)
-      .setStrokeStyle(4, 0xffd166, 1)
+    const ring = this.add.circle(target.x, target.y, 8, 0x8b0011, 0)
+      .setStrokeStyle(5, 0xff1e1e, 1)
       .setDepth(DEPTH.angerVfx + 1)
       .setBlendMode(Phaser.BlendModes.ADD);
     const label = this.add.text(target.x, target.y - 16, "ANGER +1", {
       fontFamily: "Arial Black, Arial, sans-serif",
       fontSize: "13px",
-      color: "#fff0a6",
-      stroke: "#7a1209",
+      color: "#ff3730",
+      stroke: "#4c0008",
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(DEPTH.angerVfx + 2).setBlendMode(Phaser.BlendModes.ADD);
     const sparks = this.spawnAngerImpactSpark(target.x, target.y, { weak: false });
-    this.cameras.main.shake(75, 0.0035);
+    this.cameras.main.shake(110, 0.006);
     await Promise.all([
       sparks,
       this.tweenPromise({
@@ -2761,7 +2762,7 @@ export class GameScene extends Phaser.Scene {
         scaleX: 3.1,
         scaleY: 3.1,
         alpha: 0,
-        duration: 210,
+        duration: 210 * scale,
         ease: "Quad.easeOut",
         onComplete: () => flash.destroy(),
       }),
@@ -2769,7 +2770,7 @@ export class GameScene extends Phaser.Scene {
         targets: ring,
         radius: 30,
         alpha: 0,
-        duration: 280,
+        duration: 280 * scale,
         ease: "Cubic.easeOut",
         onComplete: () => ring.destroy(),
       }),
@@ -2779,24 +2780,31 @@ export class GameScene extends Phaser.Scene {
         scaleX: 1.18,
         scaleY: 1.18,
         alpha: 0,
-        duration: 420,
+        duration: 420 * scale,
         ease: "Cubic.easeOut",
         onComplete: () => label.destroy(),
       }),
     ]);
   }
 
-  async launchAngerMeterStream(fromX, fromY, targetSegmentIndex = 0, { weak = false, orbStagger = 38 } = {}) {
+  async launchAngerMeterStream(fromX, fromY, targetSegmentIndex = 0, {
+    weak = false,
+    orbStagger = 38,
+    fast = false,
+  } = {}) {
     const target = this.getAngerSegmentTarget(targetSegmentIndex);
     const streamCount = weak ? 3 : 4;
     if (!weak) this.createAngerMeterArc(fromX, fromY, target);
     await Promise.all(Array.from({ length: streamCount }, (_, index) => (
-      this.launchAngerMeterOrb(fromX, fromY, target, index * orbStagger, { lead: !weak && index === 0 })
+      this.launchAngerMeterOrb(fromX, fromY, target, index * orbStagger, {
+        lead: !weak && index === 0,
+        duration: fast ? 170 : null,
+      })
     )));
     if (weak) {
       await this.spawnAngerImpactSpark(target.x, target.y, { weak: true });
     } else {
-      await this.presentAngerMeterCollectConfirm(target);
+      await this.presentAngerMeterCollectConfirm(target, { fast });
     }
   }
 
@@ -2806,6 +2814,43 @@ export class GameScene extends Phaser.Scene {
       ? current
       : Math.min(current, ANGER_SEGMENT_COUNT - 2);
     await this.launchAngerMeterStream(fromX, fromY, targetSegmentIndex, { weak: !killEvent?.ticked });
+  }
+
+  getAngerReactorSource(position, fallback = null) {
+    const reel = Number(position?.reel);
+    const row = Number(position?.row);
+    const sprite = this.reelSprites?.[reel]?.[row];
+    if (sprite?.active) return sprite;
+    return fallback;
+  }
+
+  async presentAnimalAngerReactions(killEvents = [], reactorPositions = [], fallback = null, reactorStartIndex = 0) {
+    const reactors = Array.isArray(reactorPositions) && reactorPositions.length
+      ? reactorPositions
+      : [fallback].filter(Boolean);
+    for (let index = 0; index < killEvents.length; index += 1) {
+      const killEvent = killEvents[index];
+      const reactorIndex = (reactorStartIndex + index) % reactors.length;
+      const reactor = this.getAngerReactorSource(reactors[reactorIndex], fallback);
+      if (!reactor) continue;
+      await Promise.all([
+        this.tweenPromise({
+          targets: reactor,
+          scaleX: reactor.scaleX * 1.2,
+          scaleY: reactor.scaleY * 1.2,
+          duration: 120,
+          yoyo: true,
+          ease: "Back.easeOut",
+        }),
+        this.launchAngerMeterForKill(reactor.x, reactor.y, killEvent),
+      ]);
+      if (killEvent?.ticked) {
+        await this.updateAngerMeter({
+          count: this.getNextAngerDisplayCount(),
+          max: ANGER_SEGMENT_COUNT,
+        });
+      }
+    }
   }
 
   async stompKillCell(cell = {}, killEvent = null) {
@@ -2837,15 +2882,11 @@ export class GameScene extends Phaser.Scene {
         this.reelSprites[reel][row] = null;
       },
     });
-    const angerPromise = isAnimal && killEvent
-      ? this.launchAngerMeterForKill(x, y, killEvent)
-      : Promise.resolve();
-
-    await Promise.all([crushTween, angerPromise]);
+    await crushTween;
     return killEvent;
   }
 
-  async presentParallelStompKills(crushedCells = [], animalKillEvents = []) {
+  async presentParallelStompKills(crushedCells = [], animalKillEvents = [], angerReactorPositions = []) {
     await Promise.all(crushedCells.map((cell) => {
       const killEvent = cell.isAnimal
         ? this.getAnimalKillEvent(animalKillEvents, cell)
@@ -2853,22 +2894,13 @@ export class GameScene extends Phaser.Scene {
       return this.stompKillCell(cell, killEvent);
     }));
 
-    const tickedEvents = crushedCells
+    const animalEvents = crushedCells
       .filter((cell) => cell.isAnimal)
-      .map((cell) => this.getAnimalKillEvent(animalKillEvents, cell))
-      .filter((killEvent) => killEvent.ticked);
-
-    for (const killEvent of tickedEvents) {
-      await this.updateAngerMeter({
-        count: this.getNextAngerDisplayCount(),
-        max: ANGER_SEGMENT_COUNT,
-      });
-      const fast = this.fastForwardRequested;
-      await this.waitForPresentation(fast ? 40 : 70, { skippable: !fast });
-    }
+      .map((cell) => this.getAnimalKillEvent(animalKillEvents, cell));
+    await this.presentAnimalAngerReactions(animalEvents, angerReactorPositions);
   }
 
-  async presentAnimalKillAngerOvercharge() {
+  async presentAnimalKillAngerOvercharge(reactorPositions = []) {
     const start = Number(this.angerMeterState?.count) || 0;
     if (start >= ANGER_SEGMENT_COUNT) return;
 
@@ -2879,11 +2911,32 @@ export class GameScene extends Phaser.Scene {
     for (let step = 0; step < stepCount; step += 1) {
       const count = start + step + 1;
       const isFinal = count === ANGER_SEGMENT_COUNT;
-      const target = this.getAngerSegmentTarget(count - 1);
       const ramp = (step + 1) / stepCount;
       const burst = ramp > 0.45;
+      const reactor = this.getAngerReactorSource(
+        reactorPositions[step % reactorPositions.length],
+        null
+      );
 
-      await this.spawnAngerImpactSpark(target.x, target.y, { weak: !burst });
+      if (reactor) {
+        await Promise.all([
+          this.tweenPromise({
+            targets: reactor,
+            scaleX: reactor.scaleX * (burst ? 1.3 : 1.18),
+            scaleY: reactor.scaleY * (burst ? 1.3 : 1.18),
+            duration: fast ? 50 : 90,
+            yoyo: true,
+            ease: "Back.easeOut",
+          }),
+          this.launchAngerMeterStream(reactor.x, reactor.y, count - 1, {
+            orbStagger: fast ? 10 : 16,
+            fast: true,
+          }),
+        ]);
+      } else {
+        const target = this.getAngerSegmentTarget(count - 1);
+        await this.spawnAngerImpactSpark(target.x, target.y, { weak: !burst });
+      }
       if (burst) {
         this.cameras.main.shake(90 + ramp * 140, 0.004 + ramp * 0.007);
       }
@@ -4757,6 +4810,7 @@ export class GameScene extends Phaser.Scene {
   async presentStompVisual(bounds, {
     crushedCells = [],
     animalKillEvents = [],
+    angerReactorPositions = [],
     bonusTriggered = false,
     teaseMs = 500,
     pauseMs = 450,
@@ -4819,7 +4873,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnStompImpactBurst(bounds.centerX, impactY + CELL_SIZE * 0.16, bounds.width);
     this.time.delayedCall(320, () => this.playGiantLaughSfx());
     if (crushedCells.length) {
-      await this.presentParallelStompKills(crushedCells, animalKillEvents);
+      await this.presentParallelStompKills(crushedCells, animalKillEvents, angerReactorPositions);
       if (winCapReached) {
         await this.waitForStompCoinSettling();
         const capTarget = this.clampToWinCap(roundTwa);
@@ -4830,7 +4884,7 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       if (bonusTriggered) {
-        await this.presentAnimalKillAngerOvercharge();
+        await this.presentAnimalKillAngerOvercharge(angerReactorPositions);
       }
     }
 
@@ -4863,6 +4917,7 @@ export class GameScene extends Phaser.Scene {
     await this.presentStompVisual(bounds, {
       crushedCells,
       animalKillEvents: stompEvent.animalKillEvents,
+      angerReactorPositions: stompEvent.angerReactorPositions,
       bonusTriggered: stompEvent.bonusTriggered,
       teaseMs: Number(stompEvent.teaseMs) || 500,
       pauseMs: Number(stompEvent.pauseMs) || 450,
@@ -5088,11 +5143,7 @@ export class GameScene extends Phaser.Scene {
         }
       },
     });
-    const angerPromise = killEvent
-      ? this.launchAngerMeterForKill(effectX, effectY, killEvent)
-      : Promise.resolve();
-
-    await Promise.all([crushTween, angerPromise]);
+    await crushTween;
   }
 
   getCrushHandExitX(enterX) {
@@ -5147,6 +5198,8 @@ export class GameScene extends Phaser.Scene {
   async performCrushGrabSequence(openHand, snappedHand, cell, target, handScale, {
     isFirstGrab = false,
     killEvent = null,
+    angerReactorPositions = [],
+    angerReactorIndex = 0,
   } = {}) {
     const reel = Number(cell.reel);
     const row = Number(cell.row);
@@ -5173,14 +5226,12 @@ export class GameScene extends Phaser.Scene {
     await this.crossfadeCrushHand(openHand, snappedHand, 130);
     if (isFirstGrab) this.playGiantLaughSfx();
     await this.crushGrabbedSymbol(sprite, target.x, target.y, cell, killEvent);
-    if (killEvent?.ticked) {
-      await this.updateAngerMeter({
-        count: this.getNextAngerDisplayCount(),
-        max: ANGER_SEGMENT_COUNT,
-      });
-      const fast = this.fastForwardRequested;
-      await this.waitForPresentation(fast ? 40 : 70, { skippable: !fast });
-    }
+    await this.presentAnimalAngerReactions(
+      killEvent ? [killEvent] : [],
+      angerReactorPositions,
+      null,
+      angerReactorIndex
+    );
   }
 
   async presentCrushFeature(crushEvent = {}) {
@@ -5190,6 +5241,9 @@ export class GameScene extends Phaser.Scene {
 
     const handScale = this.getCrushHandScale();
     const enterX = GRID_OFFSET_X - CELL_SIZE * 1.6;
+    const angerReactorPositions = Phaser.Utils.Array.Shuffle([
+      ...(Array.isArray(crushEvent.angerReactorPositions) ? crushEvent.angerReactorPositions : []),
+    ]);
 
     await this.showCrushGiantBackground(520);
     const fast = this.fastForwardRequested;
@@ -5236,6 +5290,8 @@ export class GameScene extends Phaser.Scene {
       await this.performCrushGrabSequence(openHand, snappedHand, cell, target, handScale, {
         isFirstGrab,
         killEvent,
+        angerReactorPositions,
+        angerReactorIndex: index,
       });
 
       await this.waitForPresentation(280, { skippable: true });
@@ -5248,7 +5304,7 @@ export class GameScene extends Phaser.Scene {
     await this.hideCrushGiantBackground(420);
 
     if (crushEvent.bonusTriggered) {
-      await this.presentAnimalKillAngerOvercharge();
+      await this.presentAnimalKillAngerOvercharge(angerReactorPositions);
     }
     await this.resolveAnimalAngerMood(crushEvent.bonusTriggered);
   }

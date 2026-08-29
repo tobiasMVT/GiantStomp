@@ -919,6 +919,33 @@ export class GameServer {
     return positions;
   }
 
+  ensureAnimalSurvivor(board, blockedPositions = new Set(), crushedCells = []) {
+    const survivingAnimals = this.findAnimalPositions(board);
+    if (survivingAnimals.length) return survivingAnimals;
+
+    const sparedAnimalIndex = crushedCells.findLastIndex((cell) => cell?.isAnimal);
+    if (sparedAnimalIndex >= 0) {
+      const [sparedAnimal] = crushedCells.splice(sparedAnimalIndex, 1);
+      board[sparedAnimal.reel][sparedAnimal.row] = sparedAnimal.symbol;
+      return [{
+        reel: sparedAnimal.reel,
+        row: sparedAnimal.row,
+        symbol: sparedAnimal.symbol,
+        isAnimal: true,
+      }];
+    }
+
+    const animalSymbol = this.getAnimalSymbolSet().values().next().value || 1;
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        if (blockedPositions.has(`${reel},${row}`)) continue;
+        board[reel][row] = animalSymbol;
+        return [{ reel, row, symbol: animalSymbol, isAnimal: true }];
+      }
+    }
+    return [];
+  }
+
   drawCoinType() {
     const entries = Object.entries(serverConfig.coinTypes || {}).filter(([, weight]) => Number(weight) > 0);
     if (!entries.length) return 20;
@@ -999,6 +1026,11 @@ export class GameServer {
         nextBoard[reel][row] = 0;
       }
     });
+    const angerReactorPositions = this.ensureAnimalSurvivor(
+      nextBoard,
+      new Set(crushedCells.map((cell) => `${cell.reel},${cell.row}`)),
+      crushedCells
+    );
 
     const coinWin = crushedCells
       .filter((cell) => cell.isAnimal && Number(cell.coinValue) > 0)
@@ -1010,6 +1042,7 @@ export class GameServer {
         triggered: true,
         reels,
         crushedCells,
+        angerReactorPositions,
         reelsBeforeStomp: clone(board),
         coinWin,
         teaseMs: 900,
@@ -1049,6 +1082,11 @@ export class GameServer {
       });
       nextBoard[target.reel][target.row] = 0;
     }
+    const angerReactorPositions = this.ensureAnimalSurvivor(
+      nextBoard,
+      new Set(crushedCells.map((cell) => `${cell.reel},${cell.row}`)),
+      crushedCells
+    );
 
     const coinWin = crushedCells
       .filter((cell) => cell.isAnimal && Number(cell.coinValue) > 0)
@@ -1059,6 +1097,7 @@ export class GameServer {
       crushEvent: {
         triggered: true,
         crushedCells,
+        angerReactorPositions,
         crushCount: crushedCells.length,
         reelsBeforeCrush: clone(board),
         coinWin,
