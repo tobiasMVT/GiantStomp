@@ -22,6 +22,7 @@ Each newly landed scatter charges one of three Anger segments once within the sa
 - `payways-cascade`: board contract, ways scoring, cascades, scatter consumption, Anger, and freespins.
 - `giant-stomp-feature`: mystery giant foot crush, coin drops, dev stompEntry hunt.
 - `crush-feature`: giant hand grab/squeeze on a random animal, dev crushEntry.
+- `party-feature`: animal-only party spin with pre-drop confetti and optional giant stomp.
 - `client-architecture`: Client/GameScene presentation responsibility split.
 - `forced-outcome-dev-tool`: dev-only outcome selection.
 

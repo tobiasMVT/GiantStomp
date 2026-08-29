@@ -42,7 +42,7 @@ const BONUS_SYMBOLS = [111, 222, 333, 444, 555, 666, 777, 888, 999, 1000];
 const CASH_BONUS_SYMBOLS = new Set([111, 222, 333, 444, 555]);
 const TRAP_SYMBOLS = [666, 777, 888, 999];
 const DAMAGE_SYMBOL = 1000;
-const DEFAULT_DAMAGE_METER_SEGMENTS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+const DEFAULT_DAMAGE_METER_SEGMENTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 25, 100];
 const AUTHORED_OUCH_LADDER_SEGMENTS = [...DEFAULT_DAMAGE_METER_SEGMENTS];
 const BONUS_INTRO_SCALE = 1.06;
 const BONUS_INTRO_DRIFT_X = 22;
@@ -116,6 +116,7 @@ const DEPTH = {
   background: 0,
   crushBackground: 1,
   board: 4,
+  partyFx: 3,
   crushHand: 12,
   symbols: 10,
   crushGrab: 12,
@@ -146,6 +147,16 @@ const MAIN_GAME_SPEED_SETTINGS = [
   { label: ">>", multiplier: 2 },
   { label: ">>>", multiplier: 3 },
 ];
+const PARTY_SPOTLIGHT_SPECS = [
+  { color: 0xff4fd8, x: -0.36, angle: -20 },
+  { color: 0x5ce1ff, x: -0.12, angle: -8 },
+  { color: 0xffe066, x: 0.12, angle: 8 },
+  { color: 0xb084ff, x: 0.36, angle: 20 },
+];
+const PARTY_REEL_GAP_MS = 240;
+const BONUS_TRAP_POWER_FONT_SIZE = 26;
+const OUCH_TRAP_POWER_FONT_SIZE = 25;
+const TRAP_POWER_SEPARATOR = " × ";
 
 const getReel = (reels, reel) => reels?.[reel] ?? reels?.[String(reel)] ?? [];
 const getSymbol = (reels, reel, row) => getReel(reels, reel)?.[row] ?? null;
@@ -242,6 +253,12 @@ export class GameScene extends Phaser.Scene {
     this.animalEmotion = "normal";
     this.totalWinCelebrants = [];
     this.totalWinCelebrationTimers = [];
+    this.partyDimOverlay = null;
+    this.partyFlashOverlay = null;
+    this.partySpotlights = [];
+    this.partySpotlightTweens = [];
+    this.partyBackgroundAlphaBefore = 1;
+    this.partyActive = false;
     this.bonusIntroImage = null;
     this.bonusIntroShade = null;
     this.bonusIntroSunGlow = null;
@@ -255,6 +272,7 @@ export class GameScene extends Phaser.Scene {
     this.lifeSegments = [];
     this.lifeLabels = [];
     this.trapPowerText = null;
+    this.trapPowerSeparatorText = null;
     this.trapPowerMultiplierText = null;
     this.trapPowerMultiplierPulse = null;
     this.trapLightGroups = {};
@@ -317,6 +335,7 @@ export class GameScene extends Phaser.Scene {
     this.destroyOuchTrapRig();
     this.destroyOuchLayoutTuner();
     this.clearTotalWinCelebration();
+    this.clearPartyAtmosphere({ immediate: true });
   }
 
   isOuchLayoutTunerRequested() {
@@ -885,26 +904,32 @@ export class GameScene extends Phaser.Scene {
 
     this.createDamageMeter(DEFAULT_DAMAGE_METER_SEGMENTS);
 
-    this.trapPowerText = this.add.text(centerX, bottom + 94, "0.00", {
+    const trapPowerTextStyle = {
       ...textStyle,
-      fontSize: "16px",
-      color: "#32df7f",
+      fontSize: `${BONUS_TRAP_POWER_FONT_SIZE}px`,
       stroke: "#07170e",
       strokeThickness: 5,
+    };
+    this.trapPowerText = this.add.text(centerX, bottom + 94, "0.00", {
+      ...trapPowerTextStyle,
+      color: "#32df7f",
     }).setOrigin(0.5).setDepth(DEPTH.ui);
 
+    this.trapPowerSeparatorText = this.add.text(centerX, bottom + 94, TRAP_POWER_SEPARATOR, {
+      ...trapPowerTextStyle,
+      color: "#ffe5a2",
+    }).setOrigin(0, 0.5).setDepth(DEPTH.ui).setVisible(false);
+
     this.trapPowerMultiplierText = this.add.text(centerX, bottom + 94, "", {
-      ...textStyle,
-      fontSize: "16px",
+      ...trapPowerTextStyle,
       color: "#26d07c",
-      stroke: "#161a20",
-      strokeThickness: 4,
     }).setOrigin(0, 0.5).setDepth(DEPTH.ui).setVisible(false);
 
     this.bonusUi = [
       ...this.lifeSegments,
       ...this.lifeLabels,
       this.trapPowerText,
+      this.trapPowerSeparatorText,
       this.trapPowerMultiplierText,
       ...Object.values(this.trapLightGroups)
         .flatMap(({ icon, valueLabel, lights }) => [icon, valueLabel, ...lights]),
@@ -1733,6 +1758,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.layoutBonusIntroScene();
     this.layoutBonusHoleLightFx();
+    this.layoutPartyAtmosphere();
   }
 
   getTotalWinTextLayout() {
@@ -1933,6 +1959,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentBonusIntroScene() {
+    this.clearPartyPresentation({ immediate: true });
     this.resetBonusIntroScene();
     this.mainTheme?.stop();
     this.crushBackground?.setAlpha(0);
@@ -2152,7 +2179,53 @@ export class GameScene extends Phaser.Scene {
     this.animalEmotion = "normal";
   }
 
-  async dropSymbols(reels, { getTextureKey = null } = {}) {
+  async dropReelColumn(reels, reel, { getTextureKey = null } = {}) {
+    const tweens = [];
+    let playedReelLandSound = false;
+    for (let row = 0; row < ROWS; row += 1) {
+      const symbol = getSymbol(reels, reel, row);
+      if (symbol === null || Number(symbol) <= 0) continue;
+      const target = getCellCenter(reel, row);
+      const textureKey = getTextureKey?.(symbol, reel, row) ?? null;
+      const sprite = this.createSymbol(
+        symbol,
+        reel,
+        row,
+        GRID_OFFSET_Y - CELL_SIZE * (ROWS - row + 1),
+        textureKey
+      );
+      this.reelSprites[reel][row] = sprite;
+      tweens.push(this.tweenPromise({
+        targets: sprite,
+        y: target.y,
+        duration: 430,
+        delay: row * 32,
+        ease: SYMBOL_LAND_EASE,
+        easeParams: SYMBOL_LAND_EASE_PARAMS,
+        onStart: () => {
+          if (playedReelLandSound) return;
+          playedReelLandSound = true;
+          this.playSfx(`land${reel + 1}`, { volume: 0.28 });
+        },
+      }));
+    }
+    await Promise.all(tweens);
+    if (tweens.length) {
+      this.cameras.main.shake(36, 0.00055);
+    }
+  }
+
+  async dropSymbols(reels, { getTextureKey = null, reelByReel = false, reelGapMs = PARTY_REEL_GAP_MS } = {}) {
+    if (reelByReel) {
+      for (let reel = 0; reel < REELS; reel += 1) {
+        await this.dropReelColumn(reels, reel, { getTextureKey });
+        if (reel < REELS - 1) {
+          await this.waitForPresentation(reelGapMs);
+        }
+      }
+      return;
+    }
+
     const tweens = [];
     for (let reel = 0; reel < REELS; reel += 1) {
       let playedReelLandSound = false;
@@ -2754,7 +2827,6 @@ export class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(DEPTH.angerVfx + 2).setBlendMode(Phaser.BlendModes.ADD);
     const sparks = this.spawnAngerImpactSpark(target.x, target.y, { weak: false });
-    this.cameras.main.shake(110, 0.006);
     await Promise.all([
       sparks,
       this.tweenPromise({
@@ -2944,10 +3016,6 @@ export class GameScene extends Phaser.Scene {
         const target = this.getAngerSegmentTarget(count - 1);
         await this.spawnAngerImpactSpark(target.x, target.y, { weak: !burst });
       }
-      if (burst) {
-        this.cameras.main.shake(90 + ramp * 140, 0.004 + ramp * 0.007);
-      }
-
       await this.updateAngerMeter({
         count,
         max: ANGER_SEGMENT_COUNT,
@@ -4259,6 +4327,288 @@ export class GameScene extends Phaser.Scene {
     this.totalWinCelebrants = [];
   }
 
+  spawnPartyConfetti({ count = 16 } = {}) {
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const spawnTop = GRID_OFFSET_Y - 56;
+    const fallBottom = GRID_OFFSET_Y + GRID_HEIGHT_PX + 96;
+    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc];
+
+    for (let index = 0; index < count; index += 1) {
+      const startX = centerX + Phaser.Math.Between(-230, 230);
+      const startY = spawnTop + Phaser.Math.Between(-18, 18);
+      const confetti = this.add.rectangle(
+        startX,
+        startY,
+        Phaser.Math.Between(5, 9),
+        Phaser.Math.Between(9, 16),
+        confettiColors[index % confettiColors.length],
+        1
+      ).setDepth(DEPTH.ui + 2).setAngle(Phaser.Math.Between(-40, 40)).setAlpha(0);
+      this.totalWinCelebrants.push(confetti);
+
+      const delay = index * 160;
+      const duration = Phaser.Math.Between(3600, 5400);
+      const driftX = startX + Phaser.Math.Between(-72, 72);
+      const spinAngle = confetti.angle + Phaser.Math.Between(140, 420);
+
+      this.tweens.add({
+        targets: confetti,
+        alpha: Phaser.Math.FloatBetween(0.78, 0.96),
+        duration: 220,
+        delay,
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          if (!confetti.active) return;
+          this.tweens.add({
+            targets: confetti,
+            y: fallBottom + Phaser.Math.Between(0, 48),
+            x: driftX,
+            angle: spinAngle,
+            alpha: 0,
+            duration,
+            ease: "Sine.easeIn",
+            onComplete: () => {
+              const celebrantIndex = this.totalWinCelebrants.indexOf(confetti);
+              if (celebrantIndex >= 0) this.totalWinCelebrants.splice(celebrantIndex, 1);
+              confetti.destroy();
+            },
+          });
+        },
+      });
+    }
+  }
+
+  spawnCelebrationConfetti(centerX, centerY, { count = 32 } = {}) {
+    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc];
+    for (let index = 0; index < count; index += 1) {
+      const confetti = this.add.rectangle(
+        centerX + Phaser.Math.Between(-260, 260),
+        centerY + Phaser.Math.Between(-150, 54),
+        Phaser.Math.Between(5, 10),
+        Phaser.Math.Between(10, 18),
+        confettiColors[index % confettiColors.length],
+        0.96
+      ).setDepth(DEPTH.ui + 2).setAngle(Phaser.Math.Between(-40, 40));
+      this.totalWinCelebrants.push(confetti);
+      this.tweens.add({
+        targets: confetti,
+        y: confetti.y + Phaser.Math.Between(170, 310),
+        x: confetti.x + Phaser.Math.Between(-85, 85),
+        angle: confetti.angle + Phaser.Math.Between(180, 540),
+        alpha: 0.16,
+        duration: Phaser.Math.Between(1050, 1850),
+        delay: index * 24,
+        repeat: -1,
+        repeatDelay: Phaser.Math.Between(140, 500),
+        yoyo: false,
+        ease: "Sine.easeIn",
+        onRepeat: () => confetti.setPosition(
+          centerX + Phaser.Math.Between(-260, 260),
+          centerY + Phaser.Math.Between(-150, 54)
+        ).setAlpha(0.96),
+      });
+    }
+  }
+
+  startPartyCelebration() {
+    this.clearPartyPresentation({ immediate: true });
+    this.ensurePartyAtmosphere();
+    this.layoutPartyAtmosphere();
+    this.partyActive = true;
+
+    this.partyBackgroundAlphaBefore = this.background?.alpha ?? 1;
+
+    this.partyFlashOverlay
+      ?.setVisible(true)
+      .setAlpha(0.92);
+    this.tweenPromise({
+      targets: this.partyFlashOverlay,
+      alpha: 0,
+      duration: 240,
+      ease: "Quad.easeOut",
+      onComplete: () => this.partyFlashOverlay?.setVisible(false),
+    });
+
+    this.playOuchCelebrationSfx();
+
+    this.partyDimOverlay?.setVisible(true).setAlpha(0);
+    this.tweens.add({
+      targets: this.background,
+      alpha: 0.24,
+      duration: 380,
+      ease: "Quad.easeInOut",
+    });
+    this.tweens.add({
+      targets: this.partyDimOverlay,
+      alpha: 0.68,
+      duration: 380,
+      ease: "Quad.easeInOut",
+    });
+    this.tweens.add({
+      targets: this.reelFrame,
+      alpha: 1,
+      duration: 380,
+      ease: "Quad.easeOut",
+    });
+
+    this.partySpotlights.forEach((spotlight, index) => {
+      spotlight.beam
+        .setAlpha(0)
+        .setScale(0.72, 0.55)
+        .setAngle(spotlight.baseAngle);
+      this.tweens.add({
+        targets: spotlight.beam,
+        alpha: spotlight.targetAlpha,
+        scaleX: 1,
+        scaleY: 1,
+        duration: 320 + index * 45,
+        ease: "Back.easeOut",
+      });
+    });
+    this.startPartySpotlightMotion();
+
+    this.spawnPartyConfetti({ count: 16 });
+  }
+
+  ensurePartyAtmosphere() {
+    if (this.partyDimOverlay && !this.partyDimOverlay.destroyed) return;
+
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX / 2;
+    this.partyDimOverlay = this.add.rectangle(
+      centerX,
+      centerY,
+      GRID_WIDTH_PX + 900,
+      GRID_HEIGHT_PX + 900,
+      0x100018,
+      1
+    )
+      .setDepth(DEPTH.partyFx - 0.2)
+      .setAlpha(0)
+      .setVisible(false);
+
+    this.partyFlashOverlay = this.add.rectangle(
+      centerX,
+      centerY,
+      GRID_WIDTH_PX + 900,
+      GRID_HEIGHT_PX + 900,
+      0xfff3e8,
+      1
+    )
+      .setDepth(DEPTH.transitionFx)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setVisible(false);
+
+    this.partySpotlights = PARTY_SPOTLIGHT_SPECS.map((spec) => {
+      const beam = this.add.ellipse(
+        centerX + GRID_WIDTH_PX * spec.x,
+        GRID_OFFSET_Y - 36,
+        118,
+        500,
+        spec.color,
+        0.34
+      )
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(DEPTH.partyFx)
+        .setOrigin(0.5, 0)
+        .setAngle(spec.angle)
+        .setAlpha(0);
+      return {
+        beam,
+        baseAngle: spec.angle,
+        targetAlpha: 0.42,
+        swing: spec.angle > 0 ? 18 : -18,
+      };
+    });
+  }
+
+  layoutPartyAtmosphere() {
+    if (!this.partyDimOverlay) return;
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX / 2;
+    this.partyDimOverlay.setPosition(centerX, centerY);
+    this.partyFlashOverlay?.setPosition(centerX, centerY);
+    this.partySpotlights.forEach((spotlight, index) => {
+      const spec = PARTY_SPOTLIGHT_SPECS[index];
+      if (!spec) return;
+      spotlight.beam.setPosition(
+        centerX + GRID_WIDTH_PX * spec.x,
+        GRID_OFFSET_Y - 36
+      );
+    });
+  }
+
+  startPartySpotlightMotion() {
+    this.stopPartySpotlightMotion();
+    this.partySpotlights.forEach((spotlight, index) => {
+      const swingTween = this.tweens.add({
+        targets: spotlight.beam,
+        angle: spotlight.baseAngle + spotlight.swing,
+        duration: 860 + index * 110,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      const pulseTween = this.tweens.add({
+        targets: spotlight.beam,
+        alpha: spotlight.targetAlpha * 0.58,
+        scaleX: 0.88,
+        duration: 520 + index * 70,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      this.partySpotlightTweens.push(swingTween, pulseTween);
+    });
+  }
+
+  stopPartySpotlightMotion() {
+    this.partySpotlightTweens.forEach((tween) => tween?.stop?.());
+    this.partySpotlightTweens = [];
+  }
+
+  clearPartyAtmosphere({ immediate = false } = {}) {
+    this.partyActive = false;
+    this.stopPartySpotlightMotion();
+    if (!this.partyDimOverlay) return;
+
+    const restoreBackground = () => {
+      this.background?.setAlpha(this.partyBackgroundAlphaBefore ?? 1);
+      this.partyDimOverlay?.setVisible(false).setAlpha(0);
+      this.partyFlashOverlay?.setVisible(false).setAlpha(0);
+      this.partySpotlights.forEach((spotlight) => spotlight.beam.setAlpha(0));
+    };
+
+    if (immediate) {
+      restoreBackground();
+      return;
+    }
+
+    const fadeTargets = [
+      this.partyDimOverlay,
+      ...this.partySpotlights.map((spotlight) => spotlight.beam),
+    ].filter(Boolean);
+    this.tweenPromise({
+      targets: this.background,
+      alpha: this.partyBackgroundAlphaBefore ?? 1,
+      duration: 320,
+      ease: "Quad.easeInOut",
+    });
+    this.tweenPromise({
+      targets: fadeTargets,
+      alpha: 0,
+      duration: 320,
+      ease: "Quad.easeInOut",
+      onComplete: restoreBackground,
+    });
+  }
+
+  clearPartyPresentation({ immediate = false } = {}) {
+    this.clearTotalWinCelebration();
+    this.clearPartyAtmosphere({ immediate });
+  }
+
   startTotalWinCelebration() {
     this.clearTotalWinCelebration();
     const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
@@ -4349,35 +4699,7 @@ export class GameScene extends Phaser.Scene {
       }));
     }
 
-    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc];
-    for (let index = 0; index < 32; index += 1) {
-      const confetti = this.add.rectangle(
-        centerX + Phaser.Math.Between(-260, 260),
-        centerY + Phaser.Math.Between(-150, 54),
-        Phaser.Math.Between(5, 10),
-        Phaser.Math.Between(10, 18),
-        confettiColors[index % confettiColors.length],
-        0.96
-      ).setDepth(DEPTH.ui + 2).setAngle(Phaser.Math.Between(-40, 40));
-      this.totalWinCelebrants.push(confetti);
-      this.tweens.add({
-        targets: confetti,
-        y: confetti.y + Phaser.Math.Between(170, 310),
-        x: confetti.x + Phaser.Math.Between(-85, 85),
-        angle: confetti.angle + Phaser.Math.Between(180, 540),
-        alpha: 0.16,
-        duration: Phaser.Math.Between(1050, 1850),
-        delay: index * 24,
-        repeat: -1,
-        repeatDelay: Phaser.Math.Between(140, 500),
-        yoyo: false,
-        ease: "Sine.easeIn",
-        onRepeat: () => confetti.setPosition(
-          centerX + Phaser.Math.Between(-260, 260),
-          centerY + Phaser.Math.Between(-150, 54)
-        ).setAlpha(0.96),
-      });
-    }
+    this.spawnCelebrationConfetti(centerX, centerY);
   }
 
   spawnBirdCelebrationConfetti(bird) {
@@ -4923,6 +5245,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentStompFeature(stompEvent = {}, { roundTwa = 0 } = {}) {
+    this.clearPartyPresentation({ immediate: true });
     if (!stompEvent?.triggered) return;
     const crushedCells = Array.isArray(stompEvent.crushedCells) ? stompEvent.crushedCells : [];
     const bounds = this.getStompReelBounds(stompEvent.reels || []);
@@ -5253,6 +5576,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentCrushFeature(crushEvent = {}) {
+    this.clearPartyPresentation({ immediate: true });
     if (!crushEvent?.triggered) return;
     const crushedCells = this.getCrushCells(crushEvent);
     if (!crushedCells.length) return;
@@ -5354,6 +5678,7 @@ export class GameScene extends Phaser.Scene {
     this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     this.damageMeterStatusText?.setVisible(visible && Boolean(this.damageMeterStatusText?.text));
     this.trapPowerText?.setVisible(visible);
+    this.trapPowerSeparatorText?.setVisible(visible && Boolean(this.trapPowerSeparatorText?.text));
     this.trapPowerMultiplierText?.setVisible(visible && Boolean(this.trapPowerMultiplierText?.text));
     this.countUpText?.setVisible(false);
     if (visible) {
@@ -5442,6 +5767,18 @@ export class GameScene extends Phaser.Scene {
     return `#${(colorInt & 0xffffff).toString(16).padStart(6, "0")}`;
   }
 
+  getTrapPowerFontSizePx() {
+    return this.isPostBonusOuch ? OUCH_TRAP_POWER_FONT_SIZE : BONUS_TRAP_POWER_FONT_SIZE;
+  }
+
+  applyTrapPowerTextSizing(...texts) {
+    const fontSize = `${this.getTrapPowerFontSizePx()}px`;
+    const strokeThickness = 5;
+    texts.forEach((text) => {
+      text?.setFontSize(fontSize).setStroke("#07170e", strokeThickness);
+    });
+  }
+
   layoutTrapPowerTexts(power = 0, multiplier = this.getActiveDamageMultiplier()) {
     let centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
     // In the pit scene, keep the live calculation close to the DEEPER cue
@@ -5471,11 +5808,15 @@ export class GameScene extends Phaser.Scene {
       : (Number.isFinite(activeMultiplier) && activeMultiplier > 0 ? activeMultiplier : 1);
 
     const isOuchHud = this.isPostBonusOuch;
-    this.trapPowerText?.setFontSize(isOuchHud ? "25px" : "16px");
-    this.trapPowerMultiplierText?.setFontSize(isOuchHud ? "23px" : "16px");
+    this.applyTrapPowerTextSizing(
+      this.trapPowerText,
+      this.trapPowerSeparatorText,
+      this.trapPowerMultiplierText
+    );
 
     this.trapPowerText?.setText(powerLabel);
     if (displayMultiplier === null || !this.trapPowerMultiplierText) {
+      this.trapPowerSeparatorText?.setVisible(false);
       this.trapPowerMultiplierText?.setVisible(false);
       this.syncTrapPowerMultiplierPulse(false);
       this.trapPowerText
@@ -5489,13 +5830,17 @@ export class GameScene extends Phaser.Scene {
     const multiplierColor = this.getDamageMultiplierCssColor(
       this.damageMeterEntries?.[this.ouchTrapPowerMultiplierIndex] || this.getActiveDamageMultiplierEntry()
     );
+    this.trapPowerSeparatorText
+      ?.setText(TRAP_POWER_SEPARATOR)
+      .setColor("#ffe5a2");
     this.trapPowerMultiplierText
       .setText(multiplierLabel)
       .setColor(multiplierColor);
 
     const powerWidth = this.trapPowerText.width;
+    const separatorWidth = this.trapPowerSeparatorText?.width || 0;
     const multiplierWidth = this.trapPowerMultiplierText.width;
-    const totalWidth = powerWidth + multiplierWidth;
+    const totalWidth = powerWidth + separatorWidth + multiplierWidth;
     // In Ouch, keep the enlarged calculation aligned to the right of the
     // giant rather than centering it over the old bonus HUD position.
     const startX = isOuchHud
@@ -5506,9 +5851,13 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setPosition(startX, y)
       .setVisible(visible);
+    this.trapPowerSeparatorText
+      ?.setOrigin(0, 0.5)
+      .setPosition(startX + powerWidth, y)
+      .setVisible(visible);
     this.trapPowerMultiplierText
       .setOrigin(0, 0.5)
-      .setPosition(startX + powerWidth, y)
+      .setPosition(startX + powerWidth + separatorWidth, y)
       .setVisible(visible);
     this.syncTrapPowerMultiplierPulse(visible && this.isBonusUiVisible);
   }
@@ -5534,7 +5883,7 @@ export class GameScene extends Phaser.Scene {
 
   async bopTrapPowerDisplay() {
     this.layoutTrapPowerTexts(this.trapMeterState?.power ?? 0);
-    const targets = [this.trapPowerText, this.trapPowerMultiplierText]
+    const targets = [this.trapPowerText, this.trapPowerSeparatorText, this.trapPowerMultiplierText]
       .filter((target) => target?.visible);
     if (!targets.length) return;
     targets.forEach((target) => target.setScale(1));
@@ -5999,21 +6348,8 @@ export class GameScene extends Phaser.Scene {
       }
       segment.setFillStyle(fillColor, active ? 1 : 0.9);
       segment.setStrokeStyle(active ? 2 : 1, active ? 0xffc07a : 0x9b4b2b, active ? 1 : 0.85);
-      if (!active) {
-        segment.setScale(1, 1);
-        return Promise.resolve();
-      }
-      const popScale = angerMeter.explode && index === litCount - 1
-        ? { x: 1.34, y: 1.42 }
-        : { x: 1.14 + (litCount / max) * 0.08, y: 1.22 + (litCount / max) * 0.1 };
-      return this.tweenPromise({
-        targets: segment,
-        scaleX: popScale.x,
-        scaleY: popScale.y,
-        duration: angerMeter.explode ? 150 : 110,
-        yoyo: true,
-        ease: angerMeter.explode ? "Back.easeOut" : "Sine.easeOut",
-      });
+      segment.setScale(1, 1);
+      return Promise.resolve();
     }));
     this.syncAngerBlink(count, max);
     this.syncAngerBonusBadge(count, max);
@@ -6118,7 +6454,7 @@ export class GameScene extends Phaser.Scene {
     this.resetCountUpPresentation();
     this.syncCountUpDisplay(0);
     this.clearStompLandedCoins();
-    this.clearTotalWinCelebration();
+    this.clearPartyPresentation({ immediate: true });
     this.clearPendingFastForward();
   }
 
@@ -6150,6 +6486,7 @@ export class GameScene extends Phaser.Scene {
 
   async enterBonus(gameState = {}) {
     this.clearHighlights();
+    this.clearPartyPresentation({ immediate: true });
     this.isInBonusMode = true;
     this.damageMeterIntroComplete = false;
     this.setAngerUiVisible(false);

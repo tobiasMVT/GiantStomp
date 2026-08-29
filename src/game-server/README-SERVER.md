@@ -55,17 +55,21 @@ unscaled `trapMeter.power` but do not enter `twa` until the post-bonus ouch stom
 The bonus ends after three consecutive empty spins.
 
 When the bonus ends, `resolveOuchStomp()` runs on the final trap power and damage wheel.
-Step 1 always consumes the leftmost remaining segment; each extra step rolls against
-`damageMultilpierStepOdds` (default `0.65`). Before each continuation draw, subtract the
-bracket from `damageMultilpierStepOddsReductionBasedOnCurrentWinAmount` using the last
-step's `winTbm` (`trapPower × active multiplier`). Brackets use the same floor semantics as
-the bonus gate table. Win per step is `trapPower × segment value`;
-the credited win is the **last** step's `winAmount`, attached as `ouchStompEvent` on the
-final bonus `freespin` state and added to `twa`.
+It picks a target segment index from `multilpierOdds` using trap-power brackets (same floor
+semantics as the bonus gate table). Array index matches `damageWheelSegments`. Segment indices
+already banked by collected hammers are zeroed before the weighted draw (one hammer removes
+1× weight, three hammers remove 1×–3×, etc.). At `maxDamageHammers` (10), the final segment
+is forced. Steps walk from the active meter position through the picked segment; the credited
+win is the **last** step's `winAmount`, attached as `ouchStompEvent` on the final bonus
+`freespin` state and added to `twa`.
 
 A spin reports `bonusState.livesBeforeSpin` and `livesAfterSpend` alongside the
 post-spin `livesRemaining`, so the client can show the spent life without revealing
 whether the spin resets it.
+
+Hammer symbol `1000` landings are capped by `ouchStompFeature.maxDamageHammers`
+(default `10`). At nine collected hammers only one more can land; at ten, hammer
+weight is zeroed in `bonusSymbolWeights` and further hammer landings have no effect.
 
 Trap symbols `666`, `777`, `888`, and `999` increment separate four-light collections.
 Their displayed power is awarded once, when the fourth light lands, and that trap's

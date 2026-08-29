@@ -405,6 +405,60 @@ test("trap power swap gate shifts bonusSymbolWeights toward low materials", () =
   assert.ok(lowCount > baselineLowCount);
 });
 
+test("buildBonusSymbolWeights removes hammer symbol when hammer cap is reached", () => {
+  const server = new GameServer({ random: () => 0 });
+
+  assert.ok(Number(server.buildBonusSymbolWeights({}, 0)["1000"]) > 0);
+  assert.equal(server.buildBonusSymbolWeights({}, 9)["1000"], 5);
+  assert.equal(server.buildBonusSymbolWeights({}, 10)["1000"], 0);
+});
+
+test("generateBonusBoard only injects remaining hammer slots on a single spin", () => {
+  const server = new GameServer({
+    random: () => 0,
+  });
+  const originalGate = serverConfig.bonusGateForSymbols;
+  const originalWeights = serverConfig.bonusSymbolWeights;
+  serverConfig.bonusGateForSymbols = { "6": 1 };
+  serverConfig.bonusSymbolWeights = { "1000": 1, "111": 0, "0": 0 };
+
+  try {
+    const boardAtNine = server.generateBonusBoard({ hammersCollected: 9 });
+    const hammersAtNine = boardAtNine.flat().filter((symbol) => symbol === 1000).length;
+    assert.equal(hammersAtNine, 1);
+
+    const boardAtMax = server.generateBonusBoard({ hammersCollected: 10 });
+    const hammersAtMax = boardAtMax.flat().filter((symbol) => symbol === 1000).length;
+    assert.equal(hammersAtMax, 0);
+  } finally {
+    serverConfig.bonusGateForSymbols = originalGate;
+    serverConfig.bonusSymbolWeights = originalWeights;
+  }
+});
+
+test("evaluateBonusCash ignores extra hammer landings once hammer cap is reached", () => {
+  const server = new GameServer();
+  const board = Array.from({ length: 5 }, () => Array(3).fill(0));
+  board[0][0] = 1000;
+  board[1][1] = 1000;
+  const trapTracker = { progress: {}, power: 0 };
+  const damageTracker = {
+    segments: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    removedSegments: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    remainingSegments: [10, 11, 12],
+  };
+
+  const result = server.evaluateBonusCash(board, 1, trapTracker, damageTracker);
+
+  assert.equal(result.landings.filter((landing) => landing.symbol === 1000).length, 2);
+  assert.equal(damageTracker.removedSegments.length, 10);
+  assert.deepEqual(damageTracker.remainingSegments, [11, 12]);
+  assert.equal(
+    result.landings.filter((landing) => landing.symbol === 1000 && landing.damageRemovedSegment !== null).length,
+    1
+  );
+});
+
 test("traps award power only on four lights and damage removes the lowest meter segment", () => {
   const server = new GameServer();
   const board = Array.from({ length: 5 }, () => Array(3).fill(0));
@@ -473,8 +527,8 @@ test("bonus spins report the life spent before the outcome is known", async () =
   );
 });
 
-test("resolveOuchStomp always grants step 1 and uses trapPower times multiplier for win", () => {
-  const server = new GameServer({ random: () => 1 });
+test("resolveOuchStomp picks target segment from multilpierOdds weights", () => {
+  const server = new GameServer({ random: () => 0 });
   const damageWheel = {
     segments: [1, 2, 3],
     removedSegments: [],
@@ -497,12 +551,12 @@ test("resolveOuchStomp always grants step 1 and uses trapPower times multiplier 
   assert.deepEqual(result.event.consumedSegments, [1]);
 });
 
-test("resolveOuchStomp continues while random is below damageMultilpierStepOdds", () => {
+test("resolveOuchStomp walks from active index to weighted target segment", () => {
   let roll = 0;
   const server = new GameServer({
     random: () => {
       roll += 1;
-      return roll === 1 ? 0.5 : 0.9;
+      return roll === 1 ? 0.24 : 0.99;
     },
   });
   const damageWheel = {
@@ -549,35 +603,83 @@ test("resolveDamageStepOddsBoost still resolves trap-power bracket table", () =>
   assert.equal(server.resolveDamageStepOddsForDraw(0.65, 3, server.resolveDamageStepOddsBoost(5)), 0.65);
 });
 
-test("resolveOuchStomp reduces continuation odds as current winTbm grows", () => {
+test("resolveWinAmountOddsReduction still resolves winTbm brackets", () => {
   const server = new GameServer({ random: () => 0 });
 
   assert.equal(server.resolveWinAmountOddsReduction(0), 0);
-  assert.equal(server.resolveWinAmountOddsReduction(10), 0.16);
-  assert.equal(server.resolveWinAmountOddsReduction(50), 0.69);
-  assert.equal(server.resolveDamageStepOddsForCurrentWin(0.65, 50), 0);
-  assert.equal(server.resolveDamageStepOddsForCurrentWin(0.65, 5), 0.65);
+  assert.equal(server.resolveWinAmountOddsReduction(10), 0.2);
+  assert.equal(server.resolveWinAmountOddsReduction(50), 0.35);
 });
 
-test("resolveOuchStomp stops early when current win already exceeds brake threshold", () => {
-  const damageWheel = {
-    segments: [1, 2, 3, 4],
-    removedSegments: [],
-    remainingSegments: [1, 2, 3, 4],
-  };
-  const blocked = new GameServer({ random: () => 0.1 }).resolveOuchStomp(50, damageWheel, 1);
-  assert.equal(blocked.event.steps.length, 1);
+test("buildOuchStompSegmentWeights zeroes banked segment weights per hammer", () => {
+  const server = new GameServer({ random: () => 0 });
+  const segments = [1, 2, 3, 4, 5, 10];
 
-  const continued = new GameServer({
-    random: (() => {
-      let roll = 0;
-      return () => {
-        roll += 1;
-        return roll === 1 ? 0.1 : 0.99;
-      };
-    })(),
-  }).resolveOuchStomp(5, damageWheel, 1);
-  assert.equal(continued.event.steps.length, 2);
+  assert.deepEqual(
+    server.buildOuchStompSegmentWeights(0, segments.length, 0),
+    [1, 2, 3, 4, 5, 20]
+  );
+  assert.deepEqual(
+    server.buildOuchStompSegmentWeights(0, segments.length, 1),
+    [0, 2, 3, 4, 5, 20]
+  );
+  assert.deepEqual(
+    server.buildOuchStompSegmentWeights(0, segments.length, 3),
+    [0, 0, 0, 4, 5, 20]
+  );
+});
+
+test("resolveOuchStomp cannot pick banked segments after hammers were collected", () => {
+  const server = new GameServer({ random: () => 0 });
+  const damageWheel = {
+    segments: [1, 2, 3, 4, 5, 10],
+    removedSegments: [1, 2, 3],
+    remainingSegments: [4, 5, 10],
+  };
+
+  const result = server.resolveOuchStomp(5, damageWheel, 1);
+
+  assert.ok(result.event.steps.every((step) => step.multiplier >= 4));
+  assert.equal(result.event.steps[0].multiplier, 4);
+});
+
+test("resolveOuchStomp forces last segment when hammer cap is reached", () => {
+  const server = new GameServer({ random: () => 0 });
+  const damageWheel = {
+    segments: [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
+    removedSegments: [1, 2, 3, 4, 5, 10, 15, 20, 25, 50],
+    remainingSegments: [75, 100],
+  };
+
+  const result = server.resolveOuchStomp(5, damageWheel, 1);
+
+  assert.equal(result.event.finalMultiplier, 100);
+  assert.equal(result.event.steps.at(-1).multiplier, 100);
+});
+
+test("pickOuchStompTargetIndex uses higher trap-power weight table", () => {
+  const server = new GameServer({ random: () => 0.99 });
+  const segments = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100];
+
+  const lowPowerTarget = server.pickOuchStompTargetIndex({
+    trapPower: 0,
+    segments,
+    activeIndex: 0,
+    hammersCollected: 0,
+  });
+  const highPowerTarget = server.pickOuchStompTargetIndex({
+    trapPower: 5,
+    segments,
+    activeIndex: 0,
+    hammersCollected: 0,
+  });
+
+  assert.ok(lowPowerTarget >= 0);
+  assert.ok(highPowerTarget >= 0);
+  assert.notEqual(
+    server.resolveMultiplierOddsWeights(0),
+    server.resolveMultiplierOddsWeights(5)
+  );
 });
 
 test("bonus end attaches ouchStompEvent and credits twa", async () => {
@@ -617,4 +719,51 @@ test("bonus end attaches ouchStompEvent and credits twa", async () => {
     lastBonusSpin.twa,
     Number(twaBeforeOuch) + Number(lastBonusSpin.ouchStompEvent.finalWinAmount)
   );
+});
+
+test("partyEntry ticket always triggers animal-only party on paid spin", async () => {
+  const server = new GameServer({ random: () => 0 });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "partyEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin?.partyEvent?.triggered);
+  assert.ok(spin?.stompEvent?.triggered);
+  assert.equal(spin.crushEvent, null);
+  spin.stompEvent.reelsBeforeStomp.flat().forEach((symbol) => {
+    assert.ok(symbol >= 1 && symbol <= 5, `expected animal symbol, got ${symbol}`);
+  });
+});
+
+test("party giant roll can force stomp with only animal crushed cells", () => {
+  const server = new GameServer({ random: () => 0 });
+  const result = server.resolvePartyFeature(
+    Array.from({ length: 5 }, () => Array(3).fill(6)),
+    { forceParty: true, betSize: 1 }
+  );
+
+  assert.ok(result?.partyEvent?.triggered);
+  assert.equal(result.partyEvent.giantAppeared, true);
+  assert.ok(result.stompEvent?.triggered);
+  assert.equal(result.crushEvent, null);
+  result.stompEvent.crushedCells.forEach((cell) => {
+    assert.equal(cell.isAnimal, true);
+    assert.ok(cell.symbol >= 1 && cell.symbol <= 5);
+  });
+});
+
+test("party without giant keeps a full animal board", () => {
+  const server = new GameServer({ random: () => 0.99 });
+  const result = server.resolvePartyFeature(
+    Array.from({ length: 5 }, () => Array(3).fill(6)),
+    { forceParty: true, betSize: 1 }
+  );
+
+  assert.ok(result?.partyEvent?.triggered);
+  assert.equal(result.partyEvent.giantAppeared, false);
+  assert.equal(result.stompEvent, null);
+  assert.equal(result.crushEvent, null);
+  result.board.flat().forEach((symbol) => {
+    assert.ok(symbol >= 1 && symbol <= 5, `expected animal symbol, got ${symbol}`);
+  });
 });

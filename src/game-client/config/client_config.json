@@ -81,9 +81,9 @@
       "power": 0
     },
     "damageWheel": {
-      "segments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100],
+      "segments": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 25, 100],
       "removedSegments": [],
-      "remainingSegments": [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 75, 100]
+      "remainingSegments": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 25, 100]
     }
   },
   "bonusWinAmounts": {

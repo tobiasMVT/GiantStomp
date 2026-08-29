@@ -234,12 +234,25 @@ export class GameServer {
       .filter((symbol) => Number(serverConfig.bonusWinAmounts?.[String(symbol)] || 0) > 0);
   }
 
-  buildBonusSymbolWeights(trapProgress = {}) {
+  getMaxDamageHammers() {
+    return Math.max(1, Number(serverConfig.ouchStompFeature?.maxDamageHammers) || 10);
+  }
+
+  getRemainingHammerSlots(hammersCollected = 0) {
+    const collected = Math.max(0, Number(hammersCollected) || 0);
+    return Math.max(0, this.getMaxDamageHammers() - collected);
+  }
+
+  buildBonusSymbolWeights(trapProgress = {}, hammersCollected = 0) {
     const weights = Object.fromEntries(
       Object.entries(serverConfig.bonusSymbolWeights || {})
         .map(([symbol, weight]) => [symbol, Number(weight) || 0])
         .filter(([, weight]) => weight > 0)
     );
+    const damageSymbol = String(serverConfig.bonus?.damageSymbol ?? 1000);
+    if (this.getRemainingHammerSlots(hammersCollected) <= 0) {
+      weights[damageSymbol] = 0;
+    }
     const trapSymbols = (serverConfig.bonus?.trapSymbols || [666, 777, 888, 999]).map(Number);
     const lowSymbols = this.getLowMaterialSymbols();
     const lowWeightTotal = lowSymbols.reduce(
@@ -305,6 +318,64 @@ export class GameServer {
     return Math.min(1, Math.max(0, normalizedBase - reduction));
   }
 
+  resolveMultiplierOddsWeights(trapPower = 0) {
+    const weights = this.resolveTrapPowerFloorBracket(serverConfig.multilpierOdds, trapPower);
+    if (!Array.isArray(weights) || !weights.length) return null;
+    return weights.map((weight) => Math.max(0, Number(weight) || 0));
+  }
+
+  resolveDamageMeterActiveIndex(segments = [], remaining = []) {
+    const configured = [...segments].map(Number);
+    const remainingValues = [...remaining].map(Number);
+    if (!remainingValues.length) return configured.length;
+    const index = configured.findIndex((value) => value === remainingValues[0]);
+    return index >= 0 ? index : Math.max(0, configured.length - remainingValues.length);
+  }
+
+  pickWeightedSegmentIndex(weights = [], segmentCount = 0, minIndex = 0) {
+    const normalized = Array.from({ length: segmentCount }, (_, index) =>
+      index < minIndex ? 0 : Math.max(0, Number(weights[index]) || 0)
+    );
+    const total = normalized.reduce((sum, weight) => sum + weight, 0);
+    if (total <= 0) return minIndex;
+    let pick = this.random() * total;
+    for (let index = minIndex; index < normalized.length; index += 1) {
+      pick -= normalized[index];
+      if (pick < 0) return index;
+    }
+    return normalized.length - 1;
+  }
+
+  buildOuchStompSegmentWeights(trapPower = 0, segmentCount = 0, activeIndex = 0) {
+    const baseWeights = this.resolveMultiplierOddsWeights(trapPower);
+    if (!baseWeights) return null;
+    return Array.from({ length: segmentCount }, (_, index) =>
+      index < activeIndex ? 0 : Math.max(0, Number(baseWeights[index]) || 0)
+    );
+  }
+
+  pickOuchStompTargetIndex({
+    trapPower = 0,
+    segments = [],
+    activeIndex = 0,
+    hammersCollected = 0,
+  } = {}) {
+    const lastIndex = Math.max(0, segments.length - 1);
+    const cfg = serverConfig.ouchStompFeature || {};
+    const maxHammers = Math.max(1, Number(cfg.maxDamageHammers) || 10);
+
+    if (hammersCollected >= maxHammers || activeIndex >= lastIndex) {
+      return lastIndex;
+    }
+
+    const weights = this.buildOuchStompSegmentWeights(trapPower, segments.length, activeIndex);
+    if (!weights) {
+      return activeIndex;
+    }
+
+    return this.pickWeightedSegmentIndex(weights, segments.length, activeIndex);
+  }
+
   buildBonusGateWeights({ trapPower = 0, forceSymbolLanding = false } = {}) {
     const weights = { ...(serverConfig.bonusGateForSymbols || {}) };
     const zeroAdjustment = this.resolveBonusGateZeroAdjustment(trapPower);
@@ -334,8 +405,9 @@ export class GameServer {
     return cells.slice(0, picks);
   }
 
-  generateBonusBoard({ trapPower = 0, forceSymbolLanding = false, trapProgress = {} } = {}) {
+  generateBonusBoard({ trapPower = 0, forceSymbolLanding = false, trapProgress = {}, hammersCollected = 0 } = {}) {
     const emptySymbol = Number(serverConfig.bonus?.emptySymbol ?? 0);
+    const damageSymbol = Number(serverConfig.bonus?.damageSymbol ?? 1000);
     const gateWeights = this.buildBonusGateWeights({ trapPower, forceSymbolLanding });
     const symbolCount = this.randomWeightedCount(gateWeights);
     const board = Array.from({ length: this.width }, () =>
@@ -343,9 +415,20 @@ export class GameServer {
     );
     if (symbolCount <= 0) return board;
 
-    const symbolWeights = this.buildBonusSymbolWeights(trapProgress);
+    let hammerSlotsRemaining = this.getRemainingHammerSlots(hammersCollected);
+    let symbolWeights = this.buildBonusSymbolWeights(trapProgress, hammersCollected);
     for (const { reel, row } of this.pickRandomCells(symbolCount)) {
-      board[reel][row] = this.randomSymbol(symbolWeights);
+      if (hammerSlotsRemaining <= 0) {
+        symbolWeights = {
+          ...symbolWeights,
+          [String(damageSymbol)]: 0,
+        };
+      }
+      const symbol = this.randomSymbol(symbolWeights);
+      board[reel][row] = symbol;
+      if (symbol === damageSymbol) {
+        hammerSlotsRemaining = Math.max(0, hammerSlotsRemaining - 1);
+      }
     }
     return board;
   }
@@ -390,7 +473,8 @@ export class GameServer {
     isBonus,
     forceSymbolLanding = false,
     trapPower = 0,
-    trapProgress = {}
+    trapProgress = {},
+    hammersCollected = 0,
   }) {
     if (this.boardProvider) {
       const supplied = this.boardProvider({ action, ticket, spinIndex, isBonus });
@@ -430,7 +514,7 @@ export class GameServer {
       return board;
     }
     return isBonus
-      ? this.generateBonusBoard({ trapPower, forceSymbolLanding, trapProgress })
+      ? this.generateBonusBoard({ trapPower, forceSymbolLanding, trapProgress, hammersCollected })
       : this.generateRandomBoard(serverConfig.symbolWeights);
   }
 
@@ -546,6 +630,8 @@ export class GameServer {
     damageTracker.segments ||= [...(serverConfig.damageWheelSegments || [])].map(Number);
     damageTracker.removedSegments ||= [];
     damageTracker.remainingSegments ||= [...damageTracker.segments];
+    const maxHammers = this.getMaxDamageHammers();
+    let hammersAppliedThisSpin = 0;
     const landings = [];
     let trapPower = trapTracker.power;
 
@@ -570,9 +656,14 @@ export class GameServer {
           trapTracker.progress[String(symbol)] = progressAfter;
           if (completedTrap) powerAwarded = symbolPower;
         } else if (isDamage) {
-          damageRemovedSegment = damageTracker.remainingSegments.shift() ?? null;
-          if (damageRemovedSegment !== null) {
-            damageTracker.removedSegments.push(damageRemovedSegment);
+          const remainingHammerSlots =
+            maxHammers - damageTracker.removedSegments.length - hammersAppliedThisSpin;
+          if (remainingHammerSlots > 0 && damageTracker.remainingSegments.length > 0) {
+            damageRemovedSegment = damageTracker.remainingSegments.shift() ?? null;
+            if (damageRemovedSegment !== null) {
+              damageTracker.removedSegments.push(damageRemovedSegment);
+              hammersAppliedThisSpin += 1;
+            }
           }
         } else {
           powerAwarded = symbolPower;
@@ -700,6 +791,7 @@ export class GameServer {
         forceSymbolLanding,
         trapPower: Number(trapTracker.power) || 0,
         trapProgress: trapTracker.progress,
+        hammersCollected: damageTracker.removedSegments?.length || 0,
       });
       if (!this.boardProvider) {
         board = this.injectGuaranteedBonusPowerSeed(board, trapTracker, spinIndex);
@@ -749,7 +841,7 @@ export class GameServer {
     const remaining = rawRemaining.length
       ? rawRemaining
       : (power > 0 ? [configuredSegments[0] || 1] : []);
-    const baseStepOdds = Number(serverConfig.damageMultilpierStepOdds ?? 0.66);
+    const removedSegments = [...(damageWheel?.removedSegments || [])].map(Number);
     const cfg = serverConfig.ouchStompFeature || {};
     const stepIntervalMs = Math.max(0, Number(cfg.stepIntervalMs) || 3000);
     const maxCoinsPerStep = Math.max(1, Number(cfg.maxCoinsPerStep) || 20);
@@ -765,7 +857,13 @@ export class GameServer {
 
     const consumedSegments = [];
     const steps = [];
-    const workingRemaining = [...remaining];
+    const activeIndex = this.resolveDamageMeterActiveIndex(configuredSegments, remaining);
+    const targetIndex = this.pickOuchStompTargetIndex({
+      trapPower: power,
+      segments: configuredSegments,
+      activeIndex,
+      hammersCollected: removedSegments.length,
+    });
 
     const pushStep = (multiplier) => {
       consumedSegments.push(multiplier);
@@ -778,12 +876,8 @@ export class GameServer {
       });
     };
 
-    pushStep(workingRemaining.shift());
-    while (workingRemaining.length > 0) {
-      const currentWinTbm = steps.at(-1)?.winTbm ?? 0;
-      const stepOdds = this.resolveDamageStepOddsForCurrentWin(baseStepOdds, currentWinTbm);
-      if (this.random() >= stepOdds) break;
-      pushStep(workingRemaining.shift());
+    for (let index = activeIndex; index <= targetIndex; index += 1) {
+      pushStep(configuredSegments[index] ?? configuredSegments.at(-1) ?? 1);
     }
 
     const lastStep = steps.at(-1);
@@ -897,6 +991,76 @@ export class GameServer {
 
   getCrushConfig() {
     return serverConfig.crushFeature || { odds: 0.05 };
+  }
+
+  getPartyConfig() {
+    return serverConfig.partyFeature || {
+      odds: 0.03,
+      oddsForGiant: 0.5,
+      oddsForStomp: 1,
+      oddsForCrush: 0,
+      preDropMs: 1400,
+    };
+  }
+
+  buildPartySymbolWeights() {
+    const animals = this.getAnimalSymbolSet();
+    const weights = {};
+    animals.forEach((symbolId) => {
+      weights[String(symbolId)] = Number(serverConfig.symbolWeights?.[String(symbolId)] || 1);
+    });
+    return weights;
+  }
+
+  buildPartyBoard() {
+    const weights = this.buildPartySymbolWeights();
+    return Array.from({ length: this.width }, () =>
+      Array.from({ length: this.height }, () => this.randomSymbol(weights))
+    );
+  }
+
+  resolvePartyFeature(board, { forceParty = false, allowNatural = false, betSize = 1 } = {}) {
+    if (!forceParty && !allowNatural) return null;
+    const cfg = this.getPartyConfig();
+    const triggered = forceParty || this.random() < Number(cfg.odds || 0);
+    if (!triggered) return null;
+
+    const partyBoard = this.buildPartyBoard();
+    const giantAppeared = this.random() < Number(cfg.oddsForGiant ?? 0.5);
+    let finalBoard = partyBoard;
+    let stompEvent = null;
+    let crushEvent = null;
+
+    if (giantAppeared) {
+      const giantType = this.drawWeightedKey({
+        stomp: Number(cfg.oddsForStomp ?? 1),
+        crush: Number(cfg.oddsForCrush ?? 0),
+      }, "stomp");
+      if (giantType === "stomp") {
+        const stompResult = this.resolveStompFeature(partyBoard, { forceStomp: true, betSize });
+        if (stompResult) {
+          finalBoard = stompResult.board;
+          stompEvent = stompResult.stompEvent;
+        }
+      } else {
+        const crushResult = this.resolveCrushFeature(partyBoard, { forceCrush: true, betSize });
+        if (crushResult) {
+          finalBoard = crushResult.board;
+          crushEvent = crushResult.crushEvent;
+        }
+      }
+    }
+
+    return {
+      board: finalBoard,
+      partyEvent: {
+        triggered: true,
+        giantAppeared,
+        preDropMs: Math.max(0, Number(cfg.preDropMs) || 1400),
+      },
+      stompEvent,
+      crushEvent,
+    };
   }
 
   getAnimalSymbolSet() {
@@ -1219,6 +1383,7 @@ export class GameServer {
     bonusTriggeredThisAction,
     stompEvent = null,
     crushEvent = null,
+    partyEvent = null,
     animalKillEvents = [],
   }) {
     const angerMax = this.getAngerMeterMax();
@@ -1263,6 +1428,7 @@ export class GameServer {
       },
       stompEvent: stompEvent ? clone(stompEvent) : null,
       crushEvent: crushEvent ? clone(crushEvent) : null,
+      partyEvent: partyEvent ? clone(partyEvent) : null,
       winCapReached,
       roundMeta: clone(roundMeta)
     };
@@ -1285,45 +1451,65 @@ export class GameServer {
     allowNaturalStomp = false,
     forceCrush = false,
     allowNaturalCrush = false,
+    forceParty = false,
+    allowNaturalParty = false,
     forceBonus = false,
   }) {
     let board = clone(initialBoard);
     let stompEvent = null;
     let crushEvent = null;
+    let partyEvent = null;
     let animalKillEvents = [];
     let bonusTriggeredThisAction = false;
 
     if (initialAction === "spin" && !isBonus) {
-      const stompResult = this.resolveStompFeature(board, {
-        forceStomp,
-        allowNatural: allowNaturalStomp,
-        betSize
+      const partyResult = this.resolvePartyFeature(board, {
+        forceParty,
+        allowNatural: allowNaturalParty,
+        betSize,
       });
-      if (stompResult) {
-        board = stompResult.board;
-        stompEvent = stompResult.stompEvent;
+      if (partyResult) {
+        board = partyResult.board;
+        partyEvent = partyResult.partyEvent;
+        stompEvent = partyResult.stompEvent;
+        crushEvent = partyResult.crushEvent;
+      } else {
+        const stompResult = this.resolveStompFeature(board, {
+          forceStomp,
+          allowNatural: allowNaturalStomp,
+          betSize
+        });
+        if (stompResult) {
+          board = stompResult.board;
+          stompEvent = stompResult.stompEvent;
+        } else {
+          const crushResult = this.resolveCrushFeature(board, {
+            forceCrush: forceCrush || forceBonus,
+            allowNatural: allowNaturalCrush,
+            betSize,
+          });
+          if (crushResult) {
+            board = crushResult.board;
+            crushEvent = crushResult.crushEvent;
+          }
+        }
+      }
+
+      if (stompEvent) {
         const capResult = this.applyWinCapAddition(
           totals,
           Number(stompEvent.coinWin || 0),
           { stompEvent }
         );
         stompEvent.winCapReached = capResult.capped || this.isWinCapReached(totals);
-      } else {
-        const crushResult = this.resolveCrushFeature(board, {
-          forceCrush: forceCrush || forceBonus,
-          allowNatural: allowNaturalCrush,
-          betSize,
-        });
-        if (crushResult) {
-          board = crushResult.board;
-          crushEvent = crushResult.crushEvent;
-          const capResult = this.applyWinCapAddition(
-            totals,
-            Number(crushEvent.coinWin || 0),
-            { crushEvent }
-          );
-          crushEvent.winCapReached = capResult.capped || this.isWinCapReached(totals);
-        }
+      }
+      if (crushEvent) {
+        const capResult = this.applyWinCapAddition(
+          totals,
+          Number(crushEvent.coinWin || 0),
+          { crushEvent }
+        );
+        crushEvent.winCapReached = capResult.capped || this.isWinCapReached(totals);
       }
 
       const killCells = stompEvent?.crushedCells || crushEvent?.crushedCells || [];
@@ -1394,6 +1580,7 @@ export class GameServer {
       bonusTriggeredThisAction,
       stompEvent,
       crushEvent,
+      partyEvent,
       animalKillEvents,
     }));
 
@@ -1412,6 +1599,8 @@ export class GameServer {
     const allowNaturalStomp = ticket === "random";
     const forceCrush = ticket === "crushEntry" || ticket === "bonusEntry";
     const allowNaturalCrush = ticket === "random";
+    const forceParty = ticket === "partyEntry";
+    const allowNaturalParty = ticket === "random";
     const tracker = this.createRoundTracker();
     const totals = { twa: 0, tbm: 0 };
     const roundStates = [];
@@ -1439,6 +1628,8 @@ export class GameServer {
       allowNaturalStomp,
       forceCrush,
       allowNaturalCrush,
+      forceParty,
+      allowNaturalParty,
       forceBonus: ticket === "bonusEntry",
     });
 
@@ -1533,6 +1724,10 @@ export class GameServer {
     return roundStates.some((state) => state.crushEvent?.triggered);
   }
 
+  hasParty(roundStates) {
+    return roundStates.some((state) => state.partyEvent?.triggered);
+  }
+
   async generateRoundStates({ betSize = 1, ticketStrategy, fakeNoWins = false, huntStompFeature = false } = {}) {
     const normalizedBet = Number(betSize);
     if (!Number.isFinite(normalizedBet) || normalizedBet <= 0) {
@@ -1572,6 +1767,7 @@ export class GameServer {
     if (ticket === "bonusEntry") return this.hasBonus(roundStates);
     if (ticket === "stompEntry") return this.hasStomp(roundStates);
     if (ticket === "crushEntry") return this.hasCrush(roundStates);
+    if (ticket === "partyEntry") return this.hasParty(roundStates);
     return false;
   }
 }

@@ -1,1 +1,1 @@
-npx react-scripts start
+npm run dev

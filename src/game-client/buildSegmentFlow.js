@@ -16,6 +16,7 @@ export function buildSegmentFlow({
   const hasScatters = Array.isArray(gameState.scatterLandings) && gameState.scatterLandings.length > 0;
   const hasStomp = !!gameState.stompEvent?.triggered;
   const hasCrush = !!gameState.crushEvent?.triggered;
+  const hasParty = !!gameState.partyEvent?.triggered;
   const isBonusCashSpin = action === "freespin" && gameState.isBonus;
   const hasBonusLandings = isBonusCashSpin
     && Array.isArray(gameState.bonusLandings)
@@ -48,8 +49,20 @@ export function buildSegmentFlow({
           await scene.spinBonusReels?.(dropReels);
           return;
         }
+        if (!hasParty) {
+          scene.clearPartyPresentation?.({ immediate: true });
+        }
         await scene.slideOutOldSymbols();
-        await scene.dropSymbols(dropReels);
+        if (hasParty) {
+          scene.startPartyCelebration?.();
+          const holdMs = Math.max(0, Number(gameState.partyEvent?.preDropMs) || 1400);
+          await waitCancellable?.(holdMs);
+          scene.animalEmotion = "celebrating";
+        }
+        await scene.dropSymbols(dropReels, {
+          reelByReel: hasParty,
+          reelGapMs: 240,
+        });
       },
       onSkipAction: skipVisual,
     },

@@ -9,9 +9,12 @@ description: Post-bonus trap resolution — server depth math, ouchStompEvent co
 
 Config in `server_config.json`:
 
-- `damageMultilpierStepOdds` — base per-draw continuation chance after the guaranteed first step (default `0.75`).
+- `multilpierOdds` — trap-power brackets mapped to per-segment weights. Array index matches `damageWheelSegments` index. Bracket keys use floor semantics (`0` → 0–4.99, `5` → 5+).
+- `ouchStompFeature.maxDamageHammers` — when this many hammers were collected during bonus, ouch stomp always picks the final segment and no further hammer symbols can land in bonus.
+- Before the weighted pick, segment indices already banked by hammers get weight `0` (one hammer zeroes index `0`, three hammers zeroes indices `0`–`2`, etc.).
+- `damageMultilpierStepOdds` — legacy continuation odds (unused by current weighted segment pick).
 - `adjust0ForBonusGate_TrapPowerValueAffects0odds` — power-range brackets that shift the bonus empty-gate weight. Each key is the range start (`0` → 0–4.99, `5` → 5–9.99, etc.).
-- `damageMultilpierStepOddsReductionBasedOnCurrentWinAmount` — winTbm brackets (`trapPower × activeMultiplier`) that subtract from continuation odds before each extra draw. Same floor-bracket semantics as the bonus gate table. Replaces trap-power continuation tuning for ouch stomp.
+- `damageMultilpierStepOddsReductionBasedOnCurrentWinAmount` — legacy winTbm brake table (unused by current weighted segment pick).
 - `adjustdamageMultilpierStepOdds_TrapPowerUpToValueAffectOdds` — legacy trap-power continuation table (unused by `resolveOuchStomp`; kept for tuning experiments).
 - `ouchStompFeature.stepIntervalMs` — client pacing hint for extra steps (default `3000`).
 - `ouchStompFeature.maxCoinsPerStep` — coin cap per step (default `20`).
@@ -19,10 +22,10 @@ Config in `server_config.json`:
 After `appendBonusCashGame` finishes, `resolveOuchStomp(trapPower, damageWheel, betSize)` runs on the final bonus trackers:
 
 1. Skip when `trapPower <= 0` or no `remainingSegments`.
-2. **Step 1 is always free** — consume leftmost segment.
-3. Each extra segment rolls against continuation odds until fail or segments exhausted. Before each draw, subtract the bracket value from `damageMultilpierStepOddsReductionBasedOnCurrentWinAmount` using the last step's `winTbm` (`trapPower × multiplier`).
-4. Per step: `winTbm = trapPower × multiplier`, `winAmount = winTbm × betSize`.
-5. Final credited win = **last step's** `winAmount` (not cumulative across steps).
+2. Resolve the active segment index from `remainingSegments[0]`.
+3. Pick a target segment index from `multilpierOdds[trapPowerBracket]` using direct weights. Indices already banked by hammers are zeroed before the draw.
+4. Force the final segment when hammer count reaches `maxDamageHammers`.
+5. Emit one step per segment from active index through target index; final credited win = **last step's** `winAmount`.
 6. Attach `ouchStompEvent` to the last bonus `freespin` state; add final win to `totals.twa`.
 
 ### Event contract

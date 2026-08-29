@@ -397,6 +397,7 @@ let maxBonusWin = 0;
 let bonusRounds = 0;
 let stompFeatureRounds = 0;
 let crushFeatureRounds = 0;
+let partyFeatureRounds = 0;
 let totalAnimalsCrushed = 0;
 let totalAnimalsCrushedInBonusRounds = 0;
 let totalTrapPower = 0;
@@ -465,6 +466,7 @@ for (let i = 1; i <= rounds; i += 1) {
 
   if (server.hasStomp(states)) stompFeatureRounds += 1;
   if (server.hasCrush(states)) crushFeatureRounds += 1;
+  if (server.hasParty(states)) partyFeatureRounds += 1;
 
   const hadBonus = server.hasBonus(states);
   if (hadBonus) {
@@ -660,6 +662,12 @@ const report = {
         completedRounds > 0 ? twoDecimals((crushFeatureRounds / completedRounds) * 100) : 0,
       frequency: formatFrequency(crushFeatureRounds, completedRounds)
     },
+    partyFeature: {
+      triggeredRounds: partyFeatureRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((partyFeatureRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(partyFeatureRounds, completedRounds)
+    },
     animalsCrushed: {
       total: totalAnimalsCrushed,
       averagePerRound: Number(avgAnimalsCrushedPerRound.toFixed(4)),
@@ -702,6 +710,7 @@ console.log(`Avg trap power:   ${report.bonus.trapPower.average}  (max ${report.
 console.log(`Avg final mult:   ${report.bonus.finalMultiplier.average}x`);
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);
 console.log(`Crush feature:    ${report.features.crushFeature.frequency} (${report.features.crushFeature.triggeredRounds} rounds)`);
+console.log(`Party feature:    ${report.features.partyFeature.frequency} (${report.features.partyFeature.triggeredRounds} rounds)`);
 console.log(`Animals crushed:  ${report.features.animalsCrushed.total} total, ${report.features.animalsCrushed.averagePerRound} avg/round`);
 console.log(`Animals/trigger:  ${report.features.animalsCrushed.averageOnBonusTriggerRound} avg on bonus-entry spin, ratio ${report.features.animalsCrushed.animalsCrushedPerBonusRatio}`);
 console.log(`Animals/bonus:    ${report.features.animalsCrushed.averageBetweenBonuses} avg crushed between bonuses (${report.features.animalsCrushed.averagePaidSpinsBetweenBonuses} paid spins)`);
