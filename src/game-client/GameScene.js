@@ -2828,11 +2828,15 @@ export class GameScene extends Phaser.Scene {
     const reactors = Array.isArray(reactorPositions) && reactorPositions.length
       ? reactorPositions
       : [fallback].filter(Boolean);
+    const emotionDuration = this.fastForwardRequested ? 50 : 100;
     for (let index = 0; index < killEvents.length; index += 1) {
       const killEvent = killEvents[index];
       const reactorIndex = (reactorStartIndex + index) % reactors.length;
-      const reactor = this.getAngerReactorSource(reactors[reactorIndex], fallback);
+      let reactor = this.getAngerReactorSource(reactors[reactorIndex], fallback);
       if (!reactor) continue;
+      reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
+        duration: emotionDuration,
+      });
       await Promise.all([
         this.tweenPromise({
           targets: reactor,
@@ -2913,12 +2917,15 @@ export class GameScene extends Phaser.Scene {
       const isFinal = count === ANGER_SEGMENT_COUNT;
       const ramp = (step + 1) / stepCount;
       const burst = ramp > 0.45;
-      const reactor = this.getAngerReactorSource(
+      let reactor = this.getAngerReactorSource(
         reactorPositions[step % reactorPositions.length],
         null
       );
 
       if (reactor) {
+        reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
+          duration: fast ? 40 : 80,
+        });
         await Promise.all([
           this.tweenPromise({
             targets: reactor,
@@ -3488,35 +3495,40 @@ export class GameScene extends Phaser.Scene {
     return this.textures.exists(texture) ? texture : null;
   }
 
+  async crossfadeSpriteAnimalEmotion(sprite, emotion = "normal", { duration = 120 } = {}) {
+    if (!sprite?.active || !ANIMAL_SYMBOLS.has(Number(sprite.symbolId))) return sprite;
+    const texture = this.getAnimalEmotionTexture(sprite.symbolId, emotion)
+      || String(sprite.symbolId);
+    if (sprite.baseTextureKey === texture) return sprite;
+    const replacement = this.add.image(sprite.x, sprite.y, texture)
+      .setScale(sprite.scaleX, sprite.scaleY)
+      .setDepth(sprite.depth)
+      .setAngle(sprite.angle)
+      .setAlpha(0)
+      .setFlip(sprite.flipX, sprite.flipY);
+    if (this.reelMask) replacement.setMask(this.reelMask);
+    Object.assign(replacement, {
+      symbolId: sprite.symbolId,
+      reel: sprite.reel,
+      row: sprite.row,
+      baseTextureKey: texture,
+    });
+    this.reelSprites[sprite.reel][sprite.row] = replacement;
+    await Promise.all([
+      this.tweenPromise({ targets: sprite, alpha: 0, duration, ease: "Quad.easeIn" }),
+      this.tweenPromise({ targets: replacement, alpha: 1, duration, ease: "Quad.easeOut" }),
+    ]);
+    sprite.destroy();
+    return replacement;
+  }
+
   async crossfadeAnimalEmotion(emotion = "normal", { excludeCells = [], duration = 120 } = {}) {
     const excluded = new Set((excludeCells || []).map((cell) => `${Number(cell.reel)}:${Number(cell.row)}`));
     const swaps = this.reelSprites.flat().filter((sprite) => (
       sprite?.active
       && ANIMAL_SYMBOLS.has(Number(sprite.symbolId))
       && !excluded.has(`${Number(sprite.reel)}:${Number(sprite.row)}`)
-    )).map((sprite) => {
-      const texture = this.getAnimalEmotionTexture(sprite.symbolId, emotion)
-        || String(sprite.symbolId);
-      if (sprite.baseTextureKey === texture) return Promise.resolve();
-      const replacement = this.add.image(sprite.x, sprite.y, texture)
-        .setScale(sprite.scaleX, sprite.scaleY)
-        .setDepth(sprite.depth)
-        .setAngle(sprite.angle)
-        .setAlpha(0)
-        .setFlip(sprite.flipX, sprite.flipY);
-      if (this.reelMask) replacement.setMask(this.reelMask);
-      Object.assign(replacement, {
-        symbolId: sprite.symbolId,
-        reel: sprite.reel,
-        row: sprite.row,
-        baseTextureKey: texture,
-      });
-      this.reelSprites[sprite.reel][sprite.row] = replacement;
-      return Promise.all([
-        this.tweenPromise({ targets: sprite, alpha: 0, duration, ease: "Quad.easeIn" }),
-        this.tweenPromise({ targets: replacement, alpha: 1, duration, ease: "Quad.easeOut" }),
-      ]).then(() => sprite.destroy());
-    });
+    )).map((sprite) => this.crossfadeSpriteAnimalEmotion(sprite, emotion, { duration }));
     this.animalEmotion = emotion;
     await Promise.all(swaps);
   }
@@ -4823,14 +4835,20 @@ export class GameScene extends Phaser.Scene {
     const fast = this.fastForwardRequested;
     await this.waitForPresentation(pauseMs, { skippable: !fast });
 
-    const footWidth = bounds.width + CELL_SIZE * 0.55;
+    // Keep the footprint tied to the actual stomped reel strip; the small overhang
+    // sells the impact without visually claiming animals on neighbouring reels.
+    const footWidth = Math.min(bounds.width + CELL_SIZE * 0.16, bounds.width * 1.08);
     const footScale = footWidth / 420;
+    const stompReelCount = new Set(crushedCells.map((cell) => Number(cell.reel))).size;
+    // The angled foot art carries more visual mass on its left side. Two-reel stomps
+    // need a small right correction to sit evenly over the intended reel strip.
+    const footX = bounds.centerX + (stompReelCount === 2 ? CELL_SIZE * 0.16 : 0);
     const startY = GRID_OFFSET_Y - CELL_SIZE * 4.1;
     const impactY = bounds.centerY + CELL_SIZE * 0.08;
     const slamY = impactY + CELL_SIZE * 0.1;
     const holdY = impactY - CELL_SIZE * 0.42;
     const fearRevealY = impactY - CELL_SIZE * 1.35;
-    const foot = this.add.image(bounds.centerX, startY, "giantfoot")
+    const foot = this.add.image(footX, startY, "giantfoot")
       .setDepth(DEPTH.stomp)
       .setScale(footScale * 0.78, footScale * 0.9)
       .setAlpha(0.98);
