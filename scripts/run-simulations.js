@@ -395,9 +395,12 @@ let maxMainGameWin = 0;
 let maxBonusWin = 0;
 
 let bonusRounds = 0;
+let superBonusRounds = 0;
 let stompFeatureRounds = 0;
 let crushFeatureRounds = 0;
 let partyFeatureRounds = 0;
+let unicornOnGameAreaRounds = 0;
+let unicornSuperBonusRounds = 0;
 let totalAnimalsCrushed = 0;
 let totalAnimalsCrushedInBonusRounds = 0;
 let totalTrapPower = 0;
@@ -467,6 +470,13 @@ for (let i = 1; i <= rounds; i += 1) {
   if (server.hasStomp(states)) stompFeatureRounds += 1;
   if (server.hasCrush(states)) crushFeatureRounds += 1;
   if (server.hasParty(states)) partyFeatureRounds += 1;
+
+  const hadUnicornOnBoard = server.hasUnicornOnGameArea(states);
+  if (hadUnicornOnBoard) unicornOnGameAreaRounds += 1;
+
+  const hadSuperBonus = server.hasSuperBonus(states);
+  if (hadSuperBonus) superBonusRounds += 1;
+  if (hadUnicornOnBoard && hadSuperBonus) unicornSuperBonusRounds += 1;
 
   const hadBonus = server.hasBonus(states);
   if (hadBonus) {
@@ -583,6 +593,11 @@ const avgPaidSpinsBetweenBonuses = meanOf(paidSpinsBetweenBonuses);
 const animalsCrushedPerBonusRatio =
   totalAnimalsCrushed > 0 ? totalAnimalsCrushedInBonusRounds / totalAnimalsCrushed : 0;
 
+const regularBonusRounds = bonusRounds - superBonusRounds;
+const unicornToSuperBonusRate = unicornOnGameAreaRounds > 0
+  ? unicornSuperBonusRounds / unicornOnGameAreaRounds
+  : 0;
+
 const report = {
   config: {
     roundsRequested: rounds,
@@ -628,6 +643,13 @@ const report = {
     bonusDetection: "server.hasBonus(states): any state with executedAction bonustransition",
     bonusFrequency: formatFrequency(bonusRounds, completedRounds),
     bonusRatePercent: completedRounds > 0 ? twoDecimals((bonusRounds / completedRounds) * 100) : 0,
+    superBonusRounds,
+    superBonusDetection: "server.hasSuperBonus(states): bonustransition with superBonusTriggered",
+    superBonusFrequency: formatFrequency(superBonusRounds, completedRounds),
+    superBonusRatePercent: completedRounds > 0 ? twoDecimals((superBonusRounds / completedRounds) * 100) : 0,
+    regularBonusRounds,
+    regularBonusFrequency: formatFrequency(regularBonusRounds, completedRounds),
+    regularBonusRatePercent: completedRounds > 0 ? twoDecimals((regularBonusRounds / completedRounds) * 100) : 0,
     ...bonusStats,
     winDistribution: {
       description: "Per bonus-round win (TWA delta while isBonus is true). Buckets: 10-wide to 200, 50-wide to 1000, 100-wide to 2000, 200-wide to 3000, 500-wide to 10000, then 10000+.",
@@ -668,6 +690,18 @@ const report = {
         completedRounds > 0 ? twoDecimals((partyFeatureRounds / completedRounds) * 100) : 0,
       frequency: formatFrequency(partyFeatureRounds, completedRounds)
     },
+    unicornOnGameArea: {
+      description: "Paid spin with symbol 14 visible on reels (unicorn injection or dev ticket board).",
+      detection: "server.hasUnicornOnGameArea(states): any paid spin state with unicorn on reels",
+      roundsWithUnicorn: unicornOnGameAreaRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((unicornOnGameAreaRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(unicornOnGameAreaRounds, completedRounds),
+      superBonusFromUnicornRounds: unicornSuperBonusRounds,
+      superBonusFromUnicornRatePercent: fourDecimals(unicornToSuperBonusRate * 100),
+      superBonusFromUnicornRateDefinition:
+        "share of unicorn-on-board rounds that entered superbonus (unicorn crushed by stomp/crush)"
+    },
     animalsCrushed: {
       total: totalAnimalsCrushed,
       averagePerRound: Number(avgAnimalsCrushedPerRound.toFixed(4)),
@@ -706,6 +740,10 @@ console.log(`Hit rate (tbm):   ${report.metrics.hitRate} (${report.metrics.hitRo
 console.log(`Main game RTP:    ${report.mainGame.rtpPercent}%  (avg win ${report.mainGame.averageWin})`);
 console.log(`Bonus RTP:        ${report.bonus.rtpPercent}%  (avg win ${report.bonus.averageWin})`);
 console.log(`Bonus frequency:  ${report.bonus.bonusFrequency} (${report.bonus.bonusRatePercent}%)`);
+console.log(`Superbonus:       ${report.bonus.superBonusFrequency} (${report.bonus.superBonusRatePercent}%, ${report.bonus.superBonusRounds} rounds)`);
+console.log(`Regular bonus:    ${report.bonus.regularBonusFrequency} (${report.bonus.regularBonusRatePercent}%, ${report.bonus.regularBonusRounds} rounds)`);
+console.log(`Unicorn on board: ${report.features.unicornOnGameArea.frequency} (${report.features.unicornOnGameArea.triggerRatePercent}%, ${report.features.unicornOnGameArea.roundsWithUnicorn} rounds)`);
+console.log(`Unicorn→super:    ${report.features.unicornOnGameArea.superBonusFromUnicornRatePercent}% of unicorn rounds (${report.features.unicornOnGameArea.superBonusFromUnicornRounds})`);
 console.log(`Avg trap power:   ${report.bonus.trapPower.average}  (max ${report.bonus.trapPower.max})`);
 console.log(`Avg final mult:   ${report.bonus.finalMultiplier.average}x`);
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);

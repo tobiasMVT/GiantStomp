@@ -47,6 +47,7 @@ class SessionService {
       settings: {
         ...defaultGameSettings,
         dev: buildDevSettings(),
+        featureBuy: buildFeatureBuySettings(),
         balance: 1000
       }
     };
@@ -90,25 +91,42 @@ const toLabel = (id) =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const getTicketStrategyIds = () => {
-  const allowedStrategiesInOrder = [
-    "max",
-    "necromancer2",
-    "mystery",
-    "mysteryWild",
-    "axe",
-    "trollTease",
-    "trollMain",
-    "trollBonus",
-    "bonus",
-    "normal"
-  ];
-
-  const valid = allowedStrategiesInOrder.filter((id) => hasPositiveWeight(rawServerConfig[id]));
+  const configured = Array.isArray(rawServerConfig.ticketStrategies)
+    ? rawServerConfig.ticketStrategies
+    : [];
+  const valid = configured.filter((id) => hasPositiveWeight(rawServerConfig[id]));
   if (valid.length > 0) {
     return valid;
   }
 
   return ["normal"];
+};
+
+const buildFeatureBuySettings = () => {
+  const config = rawServerConfig.featureBuy;
+  if (!config || config.enabled === false) {
+    return { enabled: false, options: [] };
+  }
+
+  const options = Array.isArray(config.options)
+    ? config.options
+        .map((entry) => {
+          const strategyId = typeof entry?.strategyId === "string" ? entry.strategyId : null;
+          const cost = Number(entry?.cost);
+          if (!strategyId || !Number.isFinite(cost) || cost <= 0) return null;
+          return {
+            strategyId,
+            label: entry.label || toLabel(strategyId),
+            cost
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    enabled: options.length > 0,
+    options
+  };
 };
 
 const buildDevSettings = () => {

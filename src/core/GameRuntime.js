@@ -154,6 +154,8 @@ class GameRuntime {
       this.eventBus.on("intent:musicToggled", () => this.handleMusicToggled()),
       this.eventBus.on("intent:ticketStrategySwap", () => this.handleTicketStrategySwap()),
       this.eventBus.on("intent:ticketStrategySelected", (strategyId) => this.handleTicketStrategySelected(strategyId)),
+      this.eventBus.on("intent:featureBuyRequested", (payload) => this.handleFeatureBuyRequested(payload)),
+      this.eventBus.on("intent:featureBuyClear", () => this.handleFeatureBuyClear()),
       this.eventBus.on("intent:paytableRequested", () => this.handlePaytableRequested()),
       this.eventBus.on("intent:layoutDebugToggled", () => this.handleLayoutDebugToggled()),
       this.eventBus.on("debug:layout:set", ({ enabled } = {}) => this.handleLayoutDebugToggled(enabled)),
@@ -214,6 +216,9 @@ class GameRuntime {
       ticketStrategy: this.gameController.getTicketStrategy(),
       ticketStrategies: this.gameController.getTicketStrategies(),
       ticketModeEnabled,
+      featureBuyEnabled: this.gameController.isFeatureBuyEnabled(),
+      featureBuyOptions: this.gameController.getFeatureBuyOptions(),
+      armedFeatureBuy: this.gameController.getArmedFeatureBuy(),
       layoutDebugEnabled: this.layoutDebugEnabled
     });
   }
@@ -384,6 +389,28 @@ class GameRuntime {
   handleTicketStrategySelected(strategyId) {
     if (typeof strategyId !== "string" || !strategyId) return;
     this.gameController.setTicketStrategy(strategyId);
+    this.publishUIState();
+  }
+
+  handleFeatureBuyRequested(payload = {}) {
+    if (this.gameController.isGamePlayPrevented()) return;
+    if (this.spinInFlight) return;
+
+    const { strategyId, cost, label } = payload;
+    if (typeof strategyId !== "string" || !strategyId) return;
+
+    const accepted = this.gameController.armFeatureBuy({ strategyId, cost, label });
+    if (!accepted) return;
+
+    this.publishUIState();
+  }
+
+  handleFeatureBuyClear() {
+    if (this.gameController.isGamePlayPrevented()) return;
+    if (this.spinInFlight) return;
+
+    if (!this.gameController.clearArmedFeatureBuy()) return;
+
     this.publishUIState();
   }
 

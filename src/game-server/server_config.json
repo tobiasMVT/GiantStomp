@@ -2,6 +2,14 @@
   "playBackEnd": true,
   "devMode": false,
   "mathStyle": "normal",
+  "featureBuy": {
+    "enabled": true,
+    "options": [
+      { "strategyId": "bonusEntry", "label": "Bonus", "cost": 84 },
+      { "strategyId": "partyEntry", "label": "Party", "cost": 29 },
+      { "strategyId": "superBonusEntry", "label": "Super Bonus", "cost": 166 }
+    ]
+  },
   "wincap": 10000,
   "wallet": {
     "balance": 10000,
@@ -14,6 +22,8 @@
   },
   "payingSymbols": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   "scatterSymbol": 13,
+  "unicornSymbol": 14,
+  "wildSymbols": [14],
   "symbolWeights": {
     "1": 12,
     "2": 12,
@@ -25,7 +35,14 @@
     "8": 20,
     "9": 20,
     "10": 20,
-    "13": 0
+    "13": 0,
+    "14": 0
+  },
+  "unicorn_injection": {
+    "odds": 0.02
+  },
+  "superBonus": {
+    "lives": 4
   },
   "coinTypes": {
     "20": 0,
@@ -39,7 +56,7 @@
   },
   "** value of each coin type": "",
   "coinTypeValue": {
-    "20": 1,
+    "20": 0.5,
     "21": 2,
     "22": 3,
     "23": 4,
@@ -191,7 +208,7 @@
     "guaranteedPowerSeedSymbols": [111, 222, 333, 444, 555]
   },
   "maxCascadesPerSpin": 100,
-  "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "stompEntry", "crushEntry", "partyEntry"],
+  "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "superBonusEntry", "stompEntry", "crushEntry", "partyEntry"],
   "normal": {
     "noWin": 1,
     "random_min0_max500": 0,
@@ -208,6 +225,9 @@
   },
   "bonusEntry": {
     "bonusEntry": 1
+  },
+  "superBonusEntry": {
+    "superBonusEntry": 1
   },
   "stompEntry": {
     "stompEntry": 1
@@ -245,6 +265,7 @@
       "livesBeforeSpin": 0,
       "livesAfterSpend": 0,
       "maxLives": 3,
+      "isSuperBonus": false,
       "spinsPlayed": 0,
       "resetLives": false
     },
@@ -279,6 +300,8 @@
     "partyEvent": null,
     "stompEvent": null,
     "crushEvent": null,
+    "superBonusTriggered": false,
+    "unicornCrushEvent": null,
     "ouchStompEvent": null,
     "roundSummary": null
   }

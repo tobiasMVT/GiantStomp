@@ -27,11 +27,16 @@ class RoundGateway {
     return typeof this.apiBaseUrl === "string" && this.apiBaseUrl.length > 0;
   }
 
-  async fetchRoundStatesRemote({ betSize = 1, ticketStrategy, huntStompFeature = false } = {}) {
+  async fetchRoundStatesRemote({
+    betSize = 1,
+    ticketStrategy,
+    huntStompFeature = false,
+    featureBuyStrategy = null,
+  } = {}) {
     const response = await fetch(`${this.apiBaseUrl}/api/round-states`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ betSize, ticketStrategy, huntStompFeature })
+      body: JSON.stringify({ betSize, ticketStrategy, huntStompFeature, featureBuyStrategy })
     });
 
     if (!response.ok) {
@@ -58,17 +63,28 @@ class RoundGateway {
     return [this.gameConfig?.mathStyle || "normal"];
   }
 
-  async fetchRoundStates({ betSize = 1, ticketStrategy, huntStompFeature = false } = {}) {
+  async fetchRoundStates({
+    betSize = 1,
+    ticketStrategy,
+    huntStompFeature = false,
+    featureBuyStrategy = null,
+  } = {}) {
     const huntStomp = huntStompFeature || ticketStrategy === "stompEntry";
     if (this.isRemoteApiEnabled()) {
-      return this.fetchRoundStatesRemote({ betSize, ticketStrategy, huntStompFeature: huntStomp });
+      return this.fetchRoundStatesRemote({
+        betSize,
+        ticketStrategy,
+        huntStompFeature: huntStomp,
+        featureBuyStrategy,
+      });
     }
 
     if (typeof this.gameServer?.generateRoundStates === "function") {
       return this.gameServer.generateRoundStates({
         betSize,
         ticketStrategy,
-        huntStompFeature: huntStomp
+        huntStompFeature: huntStomp,
+        featureBuyStrategy,
       });
     }
 

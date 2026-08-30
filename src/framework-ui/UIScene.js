@@ -338,6 +338,7 @@ export class UIScene extends Phaser.Scene {
     this.closeBetPicker();
     this.closeAutoplayPicker();
     this.closeDevStrategyPicker();
+    this.closeFeatureBuyPicker();
     this.destroyResponsiveTextBoxes();
     if (this._spinCutoutGfx) {
       this._spinCutoutGfx.destroy();
@@ -416,12 +417,21 @@ export class UIScene extends Phaser.Scene {
       "Bet: 1", () => this.toggleBetPicker(), "right"
     );
 
+    if (this.settings?.featureBuy?.enabled) {
+      this.controls.featureBuyButton = this.createArcButton(
+        "Bet+", () => this.handleFeatureBuyButtonClick(), "right"
+      );
+    }
+
     this._spinCutoutGfx = this.make.graphics();
     this._spinCutoutMask = this._spinCutoutGfx.createGeometryMask();
     this._spinCutoutMask.invertAlpha = true;
     this.controls.betButton.setMask(this._spinCutoutMask);
     if (this.controls.autoplayButton) {
       this.controls.autoplayButton.setMask(this._spinCutoutMask);
+    }
+    if (this.controls.featureBuyButton) {
+      this.controls.featureBuyButton.setMask(this._spinCutoutMask);
     }
 
     this.controls.rulesButton = this.createIconButton("\u2139", () => this.eventBus?.emit("intent:paytableRequested"));
@@ -876,6 +886,7 @@ export class UIScene extends Phaser.Scene {
     const baseGap = 4;
 
     const hasAutoplay = !!this.controls.autoplayButton;
+    const hasFeatureBuy = !!this.controls.featureBuyButton;
     const effectiveEdge = spinRadius + maskExtra + baseGap;
     const mainRowNaturalW = hasAutoplay
       ? secBtnW + effectiveEdge * 2
@@ -925,7 +936,7 @@ export class UIScene extends Phaser.Scene {
     const railBaseBtnH = this.controls.betButton?.getData("btnH") || 52;
     const railBaseGap = 10;
     const railExtraSpinTopGapBase = Number.isFinite(this.freespinsCounterValue) ? 26 : 14;
-    const railAboveSpinCount = hasAutoplay ? 2 : 1;
+    const railAboveSpinCount = (hasAutoplay ? 1 : 0) + (hasFeatureBuy ? 1 : 0) + 1;
     const railBaseStackH = (spinRadius * 2)
       + (railBaseBtnH * railAboveSpinCount)
       + (railBaseGap * railAboveSpinCount)
@@ -990,6 +1001,8 @@ export class UIScene extends Phaser.Scene {
     let spinY = mainRowCenterY;
     let betX = centerX + btnOffset;
     let betY = mainRowCenterY;
+    let featureBuyX = centerX + btnOffset;
+    let featureBuyY = mainRowCenterY;
     let autoplayX = centerX - btnOffset;
     let autoplayY = mainRowCenterY;
 
@@ -1020,10 +1033,20 @@ export class UIScene extends Phaser.Scene {
       betX = railCenterX;
       cursorBottom = betY - railBtnH / 2 - railGap;
 
+      if (hasFeatureBuy) {
+        featureBuyY = cursorBottom - railBtnH / 2;
+        featureBuyX = railCenterX;
+        cursorBottom = featureBuyY - railBtnH / 2 - railGap;
+      }
+
       if (hasAutoplay) {
         autoplayY = cursorBottom - railBtnH / 2;
         autoplayX = railCenterX;
       }
+    } else if (hasFeatureBuy) {
+      const scaledBtnH = (this.controls.betButton?.getData("btnH") || 52) * actionBtnScale;
+      featureBuyY = betY - scaledBtnH - scaledGap;
+      featureBuyX = betX;
     }
 
     this.controls.spinButton.setScale(spinScale).setPosition(spinX, spinY);
@@ -1044,12 +1067,18 @@ export class UIScene extends Phaser.Scene {
       });
     }
     this.controls.betButton.setScale(actionBtnScale).setPosition(betX, betY);
+    if (hasFeatureBuy) {
+      this.controls.featureBuyButton.setScale(actionBtnScale).setPosition(featureBuyX, featureBuyY);
+    }
     if (hasAutoplay) {
       this.controls.autoplayButton.setScale(actionBtnScale).setPosition(autoplayX, autoplayY);
     }
 
     const actionTextUiScale = Phaser.Math.Clamp(Math.max(actionBtnScale, 0.95), 0.95, 1.15);
     this.setContainerTextWorldScale(this.controls.betButton, actionTextUiScale);
+    if (hasFeatureBuy) {
+      this.setContainerTextWorldScale(this.controls.featureBuyButton, actionTextUiScale);
+    }
     if (hasAutoplay) {
       this.setContainerTextWorldScale(this.controls.autoplayButton, actionTextUiScale);
     }
@@ -1132,6 +1161,7 @@ export class UIScene extends Phaser.Scene {
     };
     this.layoutDevTab();
     this.layoutBetPicker();
+    this.layoutFeatureBuyPicker();
     this.layoutAutoplayPicker();
     this.layoutDevStrategyPicker();
   }
@@ -1147,6 +1177,13 @@ export class UIScene extends Phaser.Scene {
     this.setSpinButtonState(!!vm.spinEnabled, !!vm.continuationPending);
     this.refreshSpinInfoLabel();
     this.setButtonState(this.controls.betButton, !!vm.betEnabled, `Bet: ${vm.betSize ?? 1}`);
+
+    if (this.controls.featureBuyButton) {
+      const armed = vm.armedFeatureBuy;
+      const featureBuyEnabled = !!vm.featureBuyEnabled && !!vm.spinEnabled && !vm.continuationPending;
+      const label = armed?.label || "Bet+";
+      this.setButtonState(this.controls.featureBuyButton, featureBuyEnabled, label);
+    }
 
     if (this.controls.autoplayButton) {
       const apActive = vm.autoplay === "on";
@@ -1332,12 +1369,13 @@ export class UIScene extends Phaser.Scene {
   }
 
   handleScenePointerDown(pointer, currentlyOver = []) {
-    if (this._betPickerVisible || this._autoplayPickerVisible || this._devStrategyPickerVisible) {
+    if (this._betPickerVisible || this._autoplayPickerVisible || this._devStrategyPickerVisible || this._featureBuyPickerVisible) {
       const age = this.time.now - (this._pickerOpenedAt || 0);
       if (age > 100) {
         this.closeBetPicker();
         this.closeAutoplayPicker();
         this.closeDevStrategyPicker();
+        this.closeFeatureBuyPicker();
       }
       return;
     }
@@ -1494,6 +1532,7 @@ export class UIScene extends Phaser.Scene {
     } else {
       this.closeBetPicker();
       this.closeAutoplayPicker();
+      this.closeFeatureBuyPicker();
       this.openDevStrategyPicker();
     }
   }
@@ -1567,7 +1606,9 @@ export class UIScene extends Phaser.Scene {
     }
     this._devStrategyChips = null;
     this._devStrategyPickerVisible = false;
-    if (!this._betPickerVisible && !this._autoplayPickerVisible) this.setPickerMode(false);
+    if (!this._betPickerVisible && !this._autoplayPickerVisible && !this._featureBuyPickerVisible) {
+      this.setPickerMode(false);
+    }
   }
 
   layoutDevStrategyPicker() {
@@ -1831,6 +1872,7 @@ export default gameClientConfig;
     } else {
       this.closeAutoplayPicker();
       this.closeDevStrategyPicker();
+      this.closeFeatureBuyPicker();
       this.openBetPicker();
     }
   }
@@ -1845,6 +1887,8 @@ export default gameClientConfig;
       }
       this.controls.betButton?.setAlpha(0.4);
       this.controls.betButton?.setData("enabled", false);
+      this.controls.featureBuyButton?.setAlpha(0.4);
+      this.controls.featureBuyButton?.setData("enabled", false);
     } else {
       this.refreshUI();
     }
@@ -1929,7 +1973,132 @@ export default gameClientConfig;
     }
     this._betChips = null;
     this._betPickerVisible = false;
-    if (!this._autoplayPickerVisible && !this._devStrategyPickerVisible) this.setPickerMode(false);
+    if (!this._autoplayPickerVisible && !this._devStrategyPickerVisible && !this._featureBuyPickerVisible) {
+      this.setPickerMode(false);
+    }
+  }
+
+  // =====================================================================
+  // Feature Buy Picker
+  // =====================================================================
+
+  getFeatureBuyOptions() {
+    const options = this.viewModel?.featureBuyOptions || this.settings?.featureBuy?.options;
+    return Array.isArray(options) ? options : [];
+  }
+
+  handleFeatureBuyButtonClick() {
+    if (this.viewModel?.armedFeatureBuy) {
+      this.eventBus?.emit("intent:featureBuyClear");
+      return;
+    }
+    this.toggleFeatureBuyPicker();
+  }
+
+  toggleFeatureBuyPicker() {
+    if (this._featureBuyPickerVisible) {
+      this.closeFeatureBuyPicker();
+    } else {
+      this.closeBetPicker();
+      this.closeAutoplayPicker();
+      this.closeDevStrategyPicker();
+      this.openFeatureBuyPicker();
+    }
+  }
+
+  openFeatureBuyPicker() {
+    if (this._featureBuyPickerContainer) this.closeFeatureBuyPicker();
+
+    const options = this.getFeatureBuyOptions();
+    if (!options.length) return;
+
+    const container = this.add.container(0, 0).setDepth(1500);
+    const chipH = 36;
+    const chipW = 180;
+    const gap = 4;
+    const pad = 8;
+    const panelW = chipW + pad * 2;
+    const panelH = options.length * (chipH + gap) - gap + pad * 2;
+    const balance = Number(this.viewModel?.balance) || 0;
+
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a14, 0.94)
+      .setStrokeStyle(1.5, 0x555577, 0.7)
+      .setOrigin(0.5, 1);
+    container.add(bg);
+
+    options.forEach((option, i) => {
+      const canAfford = balance >= option.cost;
+      const isArmed = this.viewModel?.armedFeatureBuy?.strategyId === option.strategyId;
+      const cx = -panelW / 2 + pad + chipW / 2;
+      const cy = -panelH + pad + i * (chipH + gap) + chipH / 2;
+      const chipBg = this.add.rectangle(
+        cx,
+        cy,
+        chipW,
+        chipH,
+        isArmed ? 0x2a1800 : (canAfford ? 0x14141e : 0x111118),
+        isArmed ? 0.95 : (canAfford ? 0.8 : 0.55)
+      ).setStrokeStyle(1.5, isArmed ? 0xffd700 : (canAfford ? 0x555577 : 0x333344), 0.8);
+
+      if (canAfford) {
+        chipBg.setInteractive({ useHandCursor: true });
+      }
+
+      const chipText = this.crispText(cx, cy, `${option.label} (${option.cost})`, {
+        fontSize: "14px",
+        color: isArmed ? "#ffd700" : (canAfford ? "#a7b8ca" : "#666688"),
+        fontFamily: "Arial",
+        fontStyle: isArmed ? "bold" : "normal"
+      });
+
+      if (canAfford) {
+        chipBg.on("pointerdown", () => {
+          this.eventBus?.emit("intent:featureBuyRequested", {
+            strategyId: option.strategyId,
+            cost: option.cost,
+            label: option.label
+          });
+          this.closeFeatureBuyPicker();
+        });
+        chipBg.on("pointerover", () => chipBg.setFillStyle(isArmed ? 0x3a2800 : 0x22223a, 0.95));
+        chipBg.on("pointerout", () => chipBg.setFillStyle(
+          isArmed ? 0x2a1800 : 0x14141e,
+          isArmed ? 0.95 : 0.8
+        ));
+      }
+
+      container.add([chipBg, chipText]);
+    });
+
+    this._featureBuyPickerContainer = container;
+    this._featureBuyPickerVisible = true;
+    this._pickerOpenedAt = this.time.now;
+    this.setPickerMode(true);
+    this.controls.featureBuyButton?.setAlpha(1);
+    this.controls.featureBuyButton?.setData("enabled", true);
+    this.layoutFeatureBuyPicker();
+  }
+
+  closeFeatureBuyPicker() {
+    if (this._featureBuyPickerContainer) {
+      this._featureBuyPickerContainer.destroy(true);
+      this._featureBuyPickerContainer = null;
+    }
+    this._featureBuyPickerVisible = false;
+    if (!this._betPickerVisible && !this._autoplayPickerVisible && !this._devStrategyPickerVisible) {
+      this.setPickerMode(false);
+    }
+  }
+
+  layoutFeatureBuyPicker() {
+    if (!this._featureBuyPickerContainer || !this._cachedLayout) return;
+    if (!this.controls.featureBuyButton) return;
+    const fallbackScale = this._cachedLayout.uiScale || 1;
+    const buttonScale = this.controls.featureBuyButton.scaleX || fallbackScale;
+    const pickerScale = this._cachedLayout.actionLayout === "right-rail"
+      ? Math.max(0.9, buttonScale)
+      : fallbackScale;
+    this.positionPickerNearButton(this._featureBuyPickerContainer, this.controls.featureBuyButton, pickerScale);
   }
 
   positionPickerNearButton(pickerContainer, button, pickerScale) {
@@ -2013,6 +2182,7 @@ export default gameClientConfig;
     } else {
       this.closeBetPicker();
       this.closeDevStrategyPicker();
+      this.closeFeatureBuyPicker();
       this.openAutoplayPicker();
     }
   }
@@ -2079,7 +2249,9 @@ export default gameClientConfig;
       this._autoplayPickerContainer = null;
     }
     this._autoplayPickerVisible = false;
-    if (!this._betPickerVisible && !this._devStrategyPickerVisible) this.setPickerMode(false);
+    if (!this._betPickerVisible && !this._devStrategyPickerVisible && !this._featureBuyPickerVisible) {
+      this.setPickerMode(false);
+    }
   }
 
   layoutAutoplayPicker() {

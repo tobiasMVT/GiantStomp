@@ -513,9 +513,25 @@ export class GameServer {
       board[4][2] = 3;
       return board;
     }
-    return isBonus
+    if (ticket === "superBonusEntry") {
+      const board = this.buildNoWinBoard();
+      const { reel: unicornReel, row: unicornRow } = this.pickRandomUnicornCell();
+      board[unicornReel][unicornRow] = this.getUnicornSymbol();
+      for (let reel = 1; reel <= 3; reel += 1) {
+        for (let row = 0; row < this.height; row += 1) {
+          if (reel === unicornReel && row === unicornRow) continue;
+          board[reel][row] = ((reel + row) % 5) + 1;
+        }
+      }
+      return board;
+    }
+    const board = isBonus
       ? this.generateBonusBoard({ trapPower, forceSymbolLanding, trapProgress, hammersCollected })
       : this.generateRandomBoard(serverConfig.symbolWeights);
+    if (!isBonus && action === "spin") {
+      return this.maybeInjectUnicorn(board, { ticket });
+    }
+    return board;
   }
 
   injectGuaranteedBonusPowerSeed(board, trapTracker = {}, spinIndex = 0) {
@@ -575,12 +591,14 @@ export class GameServer {
 
   evaluateWays(reels, betSize = 1) {
     const waysWins = [];
+    const wildSymbols = this.getWildSymbolSet();
     for (const symbol of serverConfig.payingSymbols) {
       const reelPositions = [];
       for (let reel = 0; reel < this.width; reel += 1) {
         const positions = [];
         for (let row = 0; row < this.height; row += 1) {
-          if (Number(reels[reel][row]) === symbol) positions.push({ reel, row });
+          const cell = Number(reels[reel][row]);
+          if (cell === symbol || wildSymbols.has(cell)) positions.push({ reel, row });
         }
         if (positions.length === 0) break;
         reelPositions.push(positions);
@@ -711,6 +729,7 @@ export class GameServer {
     livesBeforeSpin,
     livesAfterSpend,
     maxLives,
+    isSuperBonus = false,
     spinIndex,
     trapTracker,
     damageTracker
@@ -737,6 +756,7 @@ export class GameServer {
         livesBeforeSpin,
         livesAfterSpend,
         maxLives,
+        isSuperBonus: isSuperBonus === true,
         spinsPlayed: spinIndex + 1,
         resetLives: result.hasWin
       },
@@ -762,7 +782,14 @@ export class GameServer {
   }
 
   appendBonusCashGame({ roundStates, totals, betSize, roundMeta }) {
-    const maxLives = Math.max(1, Number(serverConfig.bonus?.lives) || 3);
+    const transitionState = [...roundStates].reverse().find((state) => state.executedAction === "bonustransition");
+    const maxLives = Math.max(
+      1,
+      Number(transitionState?.bonusState?.maxLives)
+      || Number(serverConfig.bonus?.lives)
+      || 3
+    );
+    const isSuperBonus = transitionState?.bonusState?.isSuperBonus === true;
     const maxSpins = Math.max(maxLives, Number(serverConfig.bonus?.maxSpins) || 1000);
     const trapTracker = {
       progress: Object.fromEntries(
@@ -812,6 +839,7 @@ export class GameServer {
         livesBeforeSpin,
         livesAfterSpend,
         maxLives,
+        isSuperBonus,
         spinIndex,
         trapTracker,
         damageTracker
@@ -1019,13 +1047,13 @@ export class GameServer {
     );
   }
 
-  resolvePartyFeature(board, { forceParty = false, allowNatural = false, betSize = 1 } = {}) {
+  resolvePartyFeature(board, { forceParty = false, allowNatural = false, betSize = 1, ticket } = {}) {
     if (!forceParty && !allowNatural) return null;
     const cfg = this.getPartyConfig();
     const triggered = forceParty || this.random() < Number(cfg.odds || 0);
     if (!triggered) return null;
 
-    const partyBoard = this.buildPartyBoard();
+    const partyBoard = this.maybeInjectUnicorn(this.buildPartyBoard(), { ticket });
     const giantAppeared = this.random() < Number(cfg.oddsForGiant ?? 0.5);
     let finalBoard = partyBoard;
     let stompEvent = null;
@@ -1067,6 +1095,53 @@ export class GameServer {
     return new Set(
       Array.isArray(serverConfig.animalSymbols) ? serverConfig.animalSymbols.map(Number) : [1, 2, 3, 4, 5]
     );
+  }
+
+  getUnicornSymbol() {
+    return Number(serverConfig.unicornSymbol ?? 14);
+  }
+
+  getWildSymbolSet() {
+    const configured = serverConfig.wildSymbols || [serverConfig.unicornSymbol ?? 14];
+    return new Set((Array.isArray(configured) ? configured : [configured]).map(Number));
+  }
+
+  getSuperBonusLives() {
+    return Math.max(1, Number(serverConfig.superBonus?.lives) || 4);
+  }
+
+  findUnicornPositions(board) {
+    const unicornSymbol = this.getUnicornSymbol();
+    const positions = [];
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        const symbol = Number(board[reel][row]);
+        if (symbol === unicornSymbol) {
+          positions.push({ reel, row, symbol, isAnimal: false, isUnicorn: true });
+        }
+      }
+    }
+    return positions;
+  }
+
+  pickRandomUnicornCell() {
+    return {
+      reel: Math.floor(this.random() * this.width),
+      row: Math.floor(this.random() * this.height),
+    };
+  }
+
+  maybeInjectUnicorn(board, { ticket } = {}) {
+    const unicornSymbol = this.getUnicornSymbol();
+    if (ticket === "superBonusEntry") return board;
+
+    const odds = Number(serverConfig.unicorn_injection?.odds ?? 0);
+    if (odds <= 0 || this.random() >= odds) return board;
+
+    const nextBoard = clone(board);
+    const { reel, row } = this.pickRandomUnicornCell();
+    nextBoard[reel][row] = unicornSymbol;
+    return nextBoard;
   }
 
   findAnimalPositions(board) {
@@ -1167,9 +1242,8 @@ export class GameServer {
     if (!triggered) return null;
 
     const reels = this.pickStompReels();
-    const animalSymbols = new Set(
-      Array.isArray(serverConfig.animalSymbols) ? serverConfig.animalSymbols.map(Number) : [1, 2, 3, 4, 5]
-    );
+    const animalSymbols = this.getAnimalSymbolSet();
+    const unicornSymbol = this.getUnicornSymbol();
     const crushedCells = [];
     const nextBoard = clone(board);
 
@@ -1177,6 +1251,7 @@ export class GameServer {
       for (let row = 0; row < this.height; row += 1) {
         const symbol = Number(nextBoard[reel][row]);
         if (symbol <= 0) continue;
+        const isUnicorn = symbol === unicornSymbol;
         const isAnimal = animalSymbols.has(symbol);
         const coinType = isAnimal ? this.drawCoinType() : null;
         crushedCells.push({
@@ -1184,6 +1259,7 @@ export class GameServer {
           row,
           symbol,
           isAnimal,
+          isUnicorn,
           coinType,
           coinValue: coinType ? this.getCoinValue(coinType, betSize) : null
         });
@@ -1222,27 +1298,34 @@ export class GameServer {
     if (!triggered) return null;
 
     const animals = this.findAnimalPositions(board);
-    if (!animals.length) return null;
+    const unicorns = this.findUnicornPositions(board);
+    const pool = [...unicorns, ...animals];
+    if (!pool.length) return null;
 
     const crushAmount = isObject(cfg.crushAmount)
       ? this.drawWeightedCount(cfg.crushAmount, 1)
       : 1;
-    const pool = [...animals];
     const crushedCells = [];
     const nextBoard = clone(board);
     const picks = Math.min(crushAmount, pool.length);
+    const workingPool = [...pool];
 
     for (let index = 0; index < picks; index += 1) {
-      const pickIndex = Math.floor(this.random() * pool.length);
-      const target = pool.splice(pickIndex, 1)[0];
-      const coinType = this.drawCoinType();
+      const unicornIndex = workingPool.findIndex((target) => target.isUnicorn);
+      const pickIndex = unicornIndex >= 0
+        ? unicornIndex
+        : Math.floor(this.random() * workingPool.length);
+      const target = workingPool.splice(pickIndex, 1)[0];
+      const isAnimal = target.isAnimal === true;
+      const coinType = isAnimal ? this.drawCoinType() : null;
       crushedCells.push({
         reel: target.reel,
         row: target.row,
         symbol: target.symbol,
-        isAnimal: true,
+        isAnimal,
+        isUnicorn: target.isUnicorn === true,
         coinType,
-        coinValue: this.getCoinValue(coinType, betSize),
+        coinValue: coinType ? this.getCoinValue(coinType, betSize) : null,
       });
       nextBoard[target.reel][target.row] = 0;
     }
@@ -1385,6 +1468,8 @@ export class GameServer {
     crushEvent = null,
     partyEvent = null,
     animalKillEvents = [],
+    superBonusTriggered = false,
+    unicornCrushEvent = null,
   }) {
     const angerMax = this.getAngerMeterMax();
     const angerCount = bonusTriggeredThisAction ? angerMax : tracker.angerDisplay;
@@ -1409,7 +1494,9 @@ export class GameServer {
       tbm: totals.tbm,
       bgwe: bonusTriggeredThisAction,
       bonusGameWonEvent: bonusTriggeredThisAction
-        ? { source: "animalCrush", action }
+        ? (superBonusTriggered
+          ? { source: "unicornCrush", action, isSuperBonus: true }
+          : { source: "animalCrush", action })
         : null,
       isBonus,
       bonusState: {
@@ -1422,6 +1509,8 @@ export class GameServer {
         max: angerMax,
       },
       animalKillEvents: clone(animalKillEvents),
+      superBonusTriggered,
+      unicornCrushEvent: unicornCrushEvent ? clone(unicornCrushEvent) : null,
       angerEvent: {
         triggered: bonusTriggeredThisAction,
         ignoredLandings: scatterLandings.filter((landing) => !landing.counted).length,
@@ -1461,12 +1550,15 @@ export class GameServer {
     let partyEvent = null;
     let animalKillEvents = [];
     let bonusTriggeredThisAction = false;
+    let superBonusTriggered = false;
+    let unicornCrushEvent = null;
 
     if (initialAction === "spin" && !isBonus) {
       const partyResult = this.resolvePartyFeature(board, {
         forceParty,
         allowNatural: allowNaturalParty,
         betSize,
+        ticket: roundMeta?.ticket,
       });
       if (partyResult) {
         board = partyResult.board;
@@ -1513,17 +1605,38 @@ export class GameServer {
       }
 
       const killCells = stompEvent?.crushedCells || crushEvent?.crushedCells || [];
+      const unicornSymbol = this.getUnicornSymbol();
+      const unicornCrushed = killCells.some((cell) => Number(cell.symbol) === unicornSymbol);
+
+      if (unicornCrushed) {
+        const unicornCell = killCells.find((cell) => Number(cell.symbol) === unicornSymbol);
+        unicornCrushEvent = {
+          reel: unicornCell.reel,
+          row: unicornCell.row,
+          symbol: unicornSymbol,
+        };
+        tracker.triggered = true;
+        superBonusTriggered = true;
+        bonusTriggeredThisAction = true;
+      }
+
       if (killCells.length) {
-        const killResult = this.processAnimalKills(killCells, tracker, { forceBonus });
+        const killResult = this.processAnimalKills(killCells, tracker, { forceBonus: forceBonus && !superBonusTriggered });
         animalKillEvents = killResult.events;
-        bonusTriggeredThisAction = killResult.bonusTriggered;
+        if (!superBonusTriggered) {
+          bonusTriggeredThisAction = killResult.bonusTriggered;
+        }
         if (stompEvent) {
           stompEvent.animalKillEvents = clone(killResult.events);
-          stompEvent.bonusTriggered = killResult.bonusTriggered;
+          stompEvent.bonusTriggered = bonusTriggeredThisAction;
+          stompEvent.superBonusTriggered = superBonusTriggered;
+          stompEvent.unicornCrushEvent = unicornCrushEvent ? clone(unicornCrushEvent) : null;
         }
         if (crushEvent) {
           crushEvent.animalKillEvents = clone(killResult.events);
-          crushEvent.bonusTriggered = killResult.bonusTriggered;
+          crushEvent.bonusTriggered = bonusTriggeredThisAction;
+          crushEvent.superBonusTriggered = superBonusTriggered;
+          crushEvent.unicornCrushEvent = unicornCrushEvent ? clone(unicornCrushEvent) : null;
         }
       }
 
@@ -1553,8 +1666,18 @@ export class GameServer {
 
     if (this.isWinCapReached(totals)) {
       bonusTriggeredThisAction = false;
-      if (stompEvent) stompEvent.bonusTriggered = false;
-      if (crushEvent) crushEvent.bonusTriggered = false;
+      superBonusTriggered = false;
+      unicornCrushEvent = null;
+      if (stompEvent) {
+        stompEvent.bonusTriggered = false;
+        stompEvent.superBonusTriggered = false;
+        stompEvent.unicornCrushEvent = null;
+      }
+      if (crushEvent) {
+        crushEvent.bonusTriggered = false;
+        crushEvent.superBonusTriggered = false;
+        crushEvent.unicornCrushEvent = null;
+      }
     }
 
     let nextAction = !isBonus && tracker.triggered ? "bonustransition" : nextWhenDone;
@@ -1582,6 +1705,8 @@ export class GameServer {
       crushEvent,
       partyEvent,
       animalKillEvents,
+      superBonusTriggered,
+      unicornCrushEvent,
     }));
 
     if (this.isWinCapReached(totals)) return "spin";
@@ -1595,7 +1720,7 @@ export class GameServer {
     const strategy = this.resolveTicketStrategy(forced?.strategy || ticketStrategy);
     const ticket = fakeNoWins ? "noWin" : (forced?.ticket || this.drawWeightedTicket(strategy));
     const roundMeta = this.buildRoundMeta({ betSize: normalizedBet, ticketStrategy: strategy, ticket });
-    const forceStomp = ticket === "stompEntry";
+    const forceStomp = ticket === "stompEntry" || ticket === "superBonusEntry";
     const allowNaturalStomp = ticket === "random";
     const forceCrush = ticket === "crushEntry" || ticket === "bonusEntry";
     const allowNaturalCrush = ticket === "random";
@@ -1634,7 +1759,11 @@ export class GameServer {
     });
 
     if (paidNext === "bonustransition" && !this.isWinCapReached(totals)) {
-      const bonusLives = Math.max(1, Number(serverConfig.bonus?.lives) || 3);
+      const lastSpin = roundStates.at(-1);
+      const isSuperBonus = lastSpin?.superBonusTriggered === true;
+      const bonusLives = isSuperBonus
+        ? this.getSuperBonusLives()
+        : Math.max(1, Number(serverConfig.bonus?.lives) || 3);
       roundStates.push({
         ...clone(serverConfig.gameState),
         bucket: strategy,
@@ -1645,7 +1774,13 @@ export class GameServer {
         twa: totals.twa,
         tbm: totals.tbm,
         bgwe: true,
-        bonusGameWonEvent: { source: "animalCrush", action: roundStates.at(-1).executedAction },
+        bonusGameWonEvent: {
+          source: isSuperBonus ? "unicornCrush" : "animalCrush",
+          action: roundStates.at(-1).executedAction,
+          isSuperBonus,
+        },
+        superBonusTriggered: isSuperBonus,
+        unicornCrushEvent: lastSpin?.unicornCrushEvent ? clone(lastSpin.unicornCrushEvent) : null,
         isBonus: true,
         bonusState: {
           initialFreespins: bonusLives,
@@ -1654,6 +1789,7 @@ export class GameServer {
           livesBeforeSpin: bonusLives,
           livesAfterSpend: bonusLives,
           maxLives: bonusLives,
+          isSuperBonus,
           spinsPlayed: 0,
           resetLives: false
         },
@@ -1728,20 +1864,111 @@ export class GameServer {
     return roundStates.some((state) => state.partyEvent?.triggered);
   }
 
-  async generateRoundStates({ betSize = 1, ticketStrategy, fakeNoWins = false, huntStompFeature = false } = {}) {
+  hasSuperBonus(roundStates) {
+    return roundStates.some(
+      (state) => state.executedAction === "bonustransition" && state.superBonusTriggered === true
+    );
+  }
+
+  hasUnicornOnGameArea(roundStates) {
+    const unicornSymbol = this.getUnicornSymbol();
+    const hasUnicornOnReels = (reels) => {
+      if (!Array.isArray(reels)) return false;
+      return reels.some(
+        (reel) => Array.isArray(reel) && reel.some((symbol) => Number(symbol) === unicornSymbol)
+      );
+    };
+    const crushedCellsContainUnicorn = (cells) =>
+      (cells || []).some(
+        (cell) => cell?.isUnicorn === true || Number(cell?.symbol) === unicornSymbol
+      );
+
+    return roundStates.some((state) => {
+      if (state.isBonus === true || state.executedAction !== "spin") return false;
+
+      if (hasUnicornOnReels(state.reels)) return true;
+      if (hasUnicornOnReels(state.stompEvent?.reelsBeforeStomp)) return true;
+      if (state.unicornCrushEvent) return true;
+      if (crushedCellsContainUnicorn(state.stompEvent?.crushedCells)) return true;
+      if (crushedCellsContainUnicorn(state.crushEvent?.crushedCells)) return true;
+
+      return false;
+    });
+  }
+
+  resolveFeatureBuyStrategy(strategy) {
+    const allowed = new Set(["bonusEntry", "superBonusEntry", "partyEntry"]);
+    return allowed.has(strategy) ? strategy : null;
+  }
+
+  isFeatureBuyMatch(strategy, roundStates) {
+    if (strategy === "bonusEntry") {
+      return this.hasBonus(roundStates) && !this.hasSuperBonus(roundStates);
+    }
+    if (strategy === "superBonusEntry") {
+      return this.hasSuperBonus(roundStates);
+    }
+    if (strategy === "partyEntry") {
+      return this.hasParty(roundStates);
+    }
+    return false;
+  }
+
+  applyFeatureBuyBucket(roundStates, bucket) {
+    return roundStates.map((state) => ({
+      ...state,
+      bucket,
+      roundMeta: state.roundMeta
+        ? { ...state.roundMeta, ticketStrategy: bucket, featureBuy: true }
+        : state.roundMeta,
+    }));
+  }
+
+  async generateRoundStates({
+    betSize = 1,
+    ticketStrategy,
+    fakeNoWins = false,
+    huntStompFeature = false,
+    featureBuyStrategy = null,
+  } = {}) {
     const normalizedBet = Number(betSize);
     if (!Number.isFinite(normalizedBet) || normalizedBet <= 0) {
       throw new Error("betSize must be a positive number");
     }
 
+    const strategy = this.resolveTicketStrategy(ticketStrategy);
+    const normalizedFeatureBuy = this.resolveFeatureBuyStrategy(featureBuyStrategy);
+    const guaranteedStrategies = new Set([
+      "noWin",
+      "waysWin",
+      "bonusEntry",
+      "superBonusEntry",
+      "stompEntry",
+      "crushEntry",
+      "partyEntry",
+    ]);
+
+    const generateOnce = (boardStrategy = ticketStrategy) => this.generateRoundStatesOnce({
+      betSize: normalizedBet,
+      ticketStrategy: boardStrategy,
+      fakeNoWins
+    });
+
+    if (normalizedFeatureBuy) {
+      const maxAttempts = 100000;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const roundStates = generateOnce("normal");
+        if (this.isFeatureBuyMatch(normalizedFeatureBuy, roundStates)) {
+          return this.applyFeatureBuyBucket(roundStates, normalizedFeatureBuy);
+        }
+      }
+      throw new Error(`Could not find ${normalizedFeatureBuy} outcome via normal RNG`);
+    }
+
     if (huntStompFeature) {
       const maxAttempts = 100000;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const roundStates = this.generateRoundStatesOnce({
-          betSize: normalizedBet,
-          ticketStrategy,
-          fakeNoWins
-        });
+        const roundStates = generateOnce();
         if (this.hasStomp(roundStates)) {
           return roundStates;
         }
@@ -1749,11 +1976,19 @@ export class GameServer {
       throw new Error("Could not find stomp feature outcome");
     }
 
-    return this.generateRoundStatesOnce({
-      betSize: normalizedBet,
-      ticketStrategy,
-      fakeNoWins
-    });
+    if (guaranteedStrategies.has(strategy)) {
+      const maxAttempts = 1000;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const roundStates = generateOnce();
+        const ticket = roundStates[0]?.roundMeta?.ticket;
+        if (ticket && this.isTicketMatch(ticket, roundStates)) {
+          return roundStates;
+        }
+      }
+      throw new Error(`Could not generate guaranteed outcome for ${strategy}`);
+    }
+
+    return generateOnce();
   }
 
   hasBonus(roundStates) {
@@ -1765,6 +2000,10 @@ export class GameServer {
     if (ticket === "noWin") return totalTbm === 0;
     if (ticket === "waysWin") return totalTbm > 0;
     if (ticket === "bonusEntry") return this.hasBonus(roundStates);
+    if (ticket === "superBonusEntry") {
+      return this.hasBonus(roundStates)
+        && roundStates.some((state) => state.superBonusTriggered || state.bonusGameWonEvent?.source === "unicornCrush");
+    }
     if (ticket === "stompEntry") return this.hasStomp(roundStates);
     if (ticket === "crushEntry") return this.hasCrush(roundStates);
     if (ticket === "partyEntry") return this.hasParty(roundStates);

@@ -25,6 +25,33 @@ const resolveTicketStrategies = () => {
   return ids.map((id) => ({ id, label: toLabel(id) }));
 };
 
+const buildFeatureBuySettings = () => {
+  const config = serverConfig.featureBuy;
+  if (!config || config.enabled === false) {
+    return { enabled: false, options: [] };
+  }
+
+  const options = Array.isArray(config.options)
+    ? config.options
+        .map((entry) => {
+          const strategyId = typeof entry?.strategyId === "string" ? entry.strategyId : null;
+          const cost = Number(entry?.cost);
+          if (!strategyId || !Number.isFinite(cost) || cost <= 0) return null;
+          return {
+            strategyId,
+            label: entry.label || toLabel(strategyId),
+            cost
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    enabled: options.length > 0,
+    options
+  };
+};
+
 const buildSessionPayload = () => {
   const ticketStrategies = resolveTicketStrategies();
   const defaultTicketStrategy = ticketStrategies.find((entry) => entry.id === serverConfig.mathStyle)?.id
@@ -48,6 +75,7 @@ const buildSessionPayload = () => {
       quickStopAllowed: true,
       spinDelayTimer: 0,
       balance: Number(serverConfig?.wallet?.balance ?? 1000),
+      featureBuy: buildFeatureBuySettings(),
       dev: {
         ticketModeEnabled: true,
         defaultTicketStrategy,
@@ -162,12 +190,16 @@ const server = http.createServer(async (req, res) => {
       const normalizedBetSize = Number.isFinite(betSize) && betSize > 0 ? betSize : 1;
       const ticketStrategy = typeof body?.ticketStrategy === "string" ? body.ticketStrategy : undefined;
       const huntStompFeature = body?.huntStompFeature === true || ticketStrategy === "stompEntry";
+      const featureBuyStrategy = typeof body?.featureBuyStrategy === "string"
+        ? body.featureBuyStrategy
+        : undefined;
 
       const roundStates = await gameServer.generateRoundStates({
         betSize: normalizedBetSize,
         ticketStrategy,
         fakeNoWins: body?.fakeNoWins === true,
-        huntStompFeature
+        huntStompFeature,
+        featureBuyStrategy,
       });
 
       sendJson(res, 200, { roundStates });

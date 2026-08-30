@@ -16,8 +16,9 @@ export function queueGameSceneAssets(load, _deps = {}) {
     9: "assets/giantstomp/9_J.png",
     10: "assets/giantstomp/10_10.png",
     13: "assets/helldive/symbols/8.png",
+    14: "assets/giantstomp/unicorn_trans.png",
   };
-  for (const symbolId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13]) {
+  for (const symbolId of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]) {
     const path = giantStompSymbols[symbolId] || `assets/helldive/symbols/${symbolId}.png`;
     load.image(String(symbolId), path);
   }
@@ -58,8 +59,11 @@ export function queueGameSceneAssets(load, _deps = {}) {
   Object.entries(bonusSymbols).forEach(([symbolId, filename]) => {
     load.image(String(symbolId), `assets/giantstomp/bonus symbol/${filename}`);
   });
-  for (let lives = 1; lives <= 3; lives += 1) {
-    load.image(`bonus_life_${lives}`, `assets/giantstomp/bonus symbol/life${lives}.png`);
+  for (let lives = 1; lives <= 4; lives += 1) {
+    const lifeAsset = lives === 4
+      ? "assets/giantstomp/unicorn_trans.png"
+      : `assets/giantstomp/bonus symbol/life${lives}.png`;
+    load.image(`bonus_life_${lives}`, lifeAsset);
   }
   load.image("bonus_intro", "assets/giantstomp/bonus symbol/bonus_intro.png");
 

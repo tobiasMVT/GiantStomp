@@ -114,9 +114,140 @@ test("bonusEntry dev ticket forces bonus through crushed animals", async () => {
   const spin = states.find((state) => state.executedAction === "spin");
 
   assert.ok(spin?.crushEvent?.triggered || spin?.stompEvent?.triggered);
+  assert.equal(spin.roundMeta?.ticket, "bonusEntry");
   assert.equal(spin.bonusGameWonEvent?.source, "animalCrush");
   assert.equal(states.filter((state) => state.executedAction === "bonustransition").length, 1);
   assert.ok(states.filter((state) => state.executedAction === "freespin").length >= 1);
+  const transition = states.find((state) => state.executedAction === "bonustransition");
+  assert.equal(transition?.bonusState?.maxLives, 3);
+  assert.equal(transition?.bonusState?.isSuperBonus, false);
+  assert.equal(transition?.bonusState?.livesRemaining, 3);
+});
+
+test("feature buy bonus hunts normal rng until a natural bonus is found", async () => {
+  const server = new GameServer({ random: Math.random });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "bonusEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+  const transition = states.find((state) => state.executedAction === "bonustransition");
+
+  assert.ok(spin);
+  assert.notEqual(spin.roundMeta?.ticket, "bonusEntry");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.equal(spin.bucket, "bonusEntry");
+  assert.equal(states.filter((state) => state.executedAction === "bonustransition").length, 1);
+  assert.equal(transition?.bonusState?.isSuperBonus, false);
+  assert.equal(transition?.bonusState?.maxLives, 3);
+  assert.notEqual(transition?.bonusGameWonEvent?.source, "unicornCrush");
+});
+
+test("feature buy party hunts normal rng until a natural party is found", async () => {
+  const server = new GameServer({ random: Math.random });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "partyEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin?.partyEvent?.triggered);
+  assert.notEqual(spin.roundMeta?.ticket, "partyEntry");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.equal(spin.bucket, "partyEntry");
+});
+
+test("feature buy super bonus hunts normal rng until unicorn superbonus is found", async () => {
+  const server = new GameServer({ random: Math.random });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "superBonusEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+  const transition = states.find((state) => state.executedAction === "bonustransition");
+
+  assert.ok(spin);
+  assert.notEqual(spin.roundMeta?.ticket, "superBonusEntry");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.equal(spin.bucket, "superBonusEntry");
+  assert.equal(transition?.bonusState?.isSuperBonus, true);
+  assert.equal(transition?.bonusState?.maxLives, 4);
+});
+
+test("unicorn wild substitutes in left-to-right ways wins", () => {
+  const server = new GameServer({ random: () => 0 });
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const board = [
+    [3, 2, 1],
+    [unicorn, 2, 1],
+    [3, 2, 1],
+    [4, 5, 6],
+    [7, 2, 3],
+  ];
+
+  const result = server.evaluateWays(board, 1);
+
+  assert.ok(result.waysWins.some((win) => win.symbol === 3 && win.reelCount === 3));
+});
+
+test("superBonusEntry dev ticket enters four-life superbonus via unicorn stomp", async () => {
+  const server = new GameServer({ random: () => 0.999999 });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "superBonusEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+  const transition = states.find((state) => state.executedAction === "bonustransition");
+
+  assert.ok(spin?.stompEvent?.triggered);
+  assert.equal(spin.superBonusTriggered, true);
+  assert.equal(spin.bonusGameWonEvent?.source, "unicornCrush");
+  assert.equal(transition?.bonusState?.maxLives, 4);
+  assert.equal(transition?.bonusState?.isSuperBonus, true);
+  assert.equal(transition?.bonusGameWonEvent?.source, "unicornCrush");
+});
+
+test("unicorn crush overrides animal bonus roll when both die in one stomp", async () => {
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const provider = ({ action }) => {
+    if (action !== "spin") return null;
+    const board = noWinBoard();
+    board[2][1] = unicorn;
+    for (let reel = 1; reel <= 3; reel += 1) {
+      for (let row = 0; row < 3; row += 1) {
+        if (reel === 2 && row === 1) continue;
+        board[reel][row] = ((reel + row) % 5) + 1;
+      }
+    }
+    return board;
+  };
+  const server = new GameServer({ random: () => 0.999999, boardProvider: provider });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "superBonusEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.equal(spin?.bonusGameWonEvent?.source, "unicornCrush");
+  assert.equal(spin?.bonusGameWonEvent?.isSuperBonus, true);
+  assert.notEqual(spin?.bonusGameWonEvent?.source, "animalCrush");
+});
+
+test("superbonus cash landing resets lives to four", async () => {
+  const provider = ({ action, spinIndex }) => {
+    if (action === "spin") {
+      const board = noWinBoard();
+      board[2][1] = Number(serverConfig.unicornSymbol ?? 14);
+      for (let reel = 1; reel <= 3; reel += 1) {
+        for (let row = 0; row < 3; row += 1) {
+          if (reel === 2 && row === 1) continue;
+          board[reel][row] = ((reel + row) % 5) + 1;
+        }
+      }
+      return board;
+    }
+    const emptyBoard = Array.from({ length: 5 }, () => Array(3).fill(0));
+    if (spinIndex === 1) emptyBoard[2][1] = 111;
+    return emptyBoard;
+  };
+  const server = new GameServer({ random: () => 0.999999, boardProvider: provider });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "superBonusEntry" });
+  const bonusSpins = states.filter((state) => state.executedAction === "freespin");
+
+  assert.equal(bonusSpins[0]?.bonusState?.maxLives, 4);
+  assert.equal(bonusSpins[1]?.bonusState?.livesRemaining, 4);
+  assert.equal(bonusSpins[1]?.bonusState?.resetLives, true);
 });
 
 test("fake no-win rounds still report scatter landings without bonus entry", async () => {
@@ -721,8 +852,9 @@ test("bonus end attaches ouchStompEvent and credits twa", async () => {
   );
 });
 
-test("partyEntry ticket always triggers animal-only party on paid spin", async () => {
+test("partyEntry ticket always triggers party on paid spin", async () => {
   const server = new GameServer({ random: () => 0 });
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
 
   const states = await server.generateRoundStates({ ticketStrategy: "partyEntry" });
   const spin = states.find((state) => state.executedAction === "spin");
@@ -731,12 +863,44 @@ test("partyEntry ticket always triggers animal-only party on paid spin", async (
   assert.ok(spin?.stompEvent?.triggered);
   assert.equal(spin.crushEvent, null);
   spin.stompEvent.reelsBeforeStomp.flat().forEach((symbol) => {
-    assert.ok(symbol >= 1 && symbol <= 5, `expected animal symbol, got ${symbol}`);
+    assert.ok(
+      (symbol >= 1 && symbol <= 5) || symbol === unicorn,
+      `expected animal or unicorn symbol, got ${symbol}`
+    );
   });
 });
 
-test("party giant roll can force stomp with only animal crushed cells", () => {
+test("party board can include injected unicorn", () => {
   const server = new GameServer({ random: () => 0 });
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const result = server.resolvePartyFeature(
+    Array.from({ length: 5 }, () => Array(3).fill(6)),
+    { forceParty: true, betSize: 1 }
+  );
+
+  assert.ok(result?.partyEvent?.triggered);
+  const symbols = result.stompEvent?.reelsBeforeStomp?.flat() ?? result.board.flat();
+  assert.ok(symbols.includes(unicorn), "expected unicorn on party board");
+});
+
+test("party stomp can crush unicorn for superbonus entry", async () => {
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const server = new GameServer({ random: () => 0 });
+  server.pickRandomUnicornCell = () => ({ reel: 2, row: 1 });
+  server.pickStompReels = () => [2];
+
+  const states = await server.generateRoundStates({ ticketStrategy: "partyEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin?.partyEvent?.triggered);
+  assert.ok(spin?.stompEvent?.crushedCells?.some((cell) => cell.isUnicorn));
+  assert.equal(spin?.superBonusTriggered, true);
+  assert.equal(spin?.bonusGameWonEvent?.source, "unicornCrush");
+});
+
+test("party giant roll can force stomp with animal or unicorn crushed cells", () => {
+  const server = new GameServer({ random: () => 0 });
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
   const result = server.resolvePartyFeature(
     Array.from({ length: 5 }, () => Array(3).fill(6)),
     { forceParty: true, betSize: 1 }
@@ -747,8 +911,11 @@ test("party giant roll can force stomp with only animal crushed cells", () => {
   assert.ok(result.stompEvent?.triggered);
   assert.equal(result.crushEvent, null);
   result.stompEvent.crushedCells.forEach((cell) => {
-    assert.equal(cell.isAnimal, true);
-    assert.ok(cell.symbol >= 1 && cell.symbol <= 5);
+    assert.ok(
+      cell.isUnicorn === true || (cell.isAnimal === true && cell.symbol >= 1 && cell.symbol <= 5),
+      `unexpected crushed cell symbol ${cell.symbol}`
+    );
+    if (cell.isUnicorn) assert.equal(cell.symbol, unicorn);
   });
 });
 

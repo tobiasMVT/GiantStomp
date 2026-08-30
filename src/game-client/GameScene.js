@@ -101,6 +101,7 @@ function blendMultiplierColor(colorInt, factor) {
 }
 const LIFE_SEGMENT_SCALE = 0.3;
 const ANGER_SEGMENT_COUNT = 10;
+const RAINBOW_ANGER_COLORS = [0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x5ac8fa, 0x5856d6, 0xaf52de];
 const CONSTRUCTION_SFX = ["construction_1", "construction_2", "construction_3"];
 const ANIMAL_CRUSH_SFX = ["animal_crush_splatter", "animal_crush_gore"];
 const OUCH_STOMP_SFX = ["ouch_stomp1", "ouch_stomp2"];
@@ -156,6 +157,8 @@ const PARTY_SPOTLIGHT_SPECS = [
 const PARTY_REEL_GAP_MS = 240;
 const BONUS_TRAP_POWER_FONT_SIZE = 26;
 const OUCH_TRAP_POWER_FONT_SIZE = 25;
+const OUCH_LADDER_MULTIPLIER_FONT_SIZE = 22;
+const OUCH_LADDER_MULTIPLIER_STROKE = 3;
 const TRAP_POWER_SEPARATOR = " × ";
 
 const getReel = (reels, reel) => reels?.[reel] ?? reels?.[String(reel)] ?? [];
@@ -271,6 +274,7 @@ export class GameScene extends Phaser.Scene {
     this.bonusUi = [];
     this.lifeSegments = [];
     this.lifeLabels = [];
+    this.bonusMaxLives = 3;
     this.trapPowerText = null;
     this.trapPowerSeparatorText = null;
     this.trapPowerMultiplierText = null;
@@ -279,6 +283,10 @@ export class GameScene extends Phaser.Scene {
     this.trapMeterState = { progress: {}, required: 4, values: {}, power: 0 };
     this.angerBlinkTween = null;
     this.angerBonusPulseTween = null;
+    this.angerBonusSuperLabel = null;
+    this.superBonusRainbowTimer = null;
+    this.superBonusRainbowPulseTween = null;
+    this.activeUnicornCloud = null;
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
     this.damageMeterSlots = [];
@@ -336,6 +344,7 @@ export class GameScene extends Phaser.Scene {
     this.destroyOuchLayoutTuner();
     this.clearTotalWinCelebration();
     this.clearPartyAtmosphere({ immediate: true });
+    this.destroyUnicornRainbowCloud({ immediate: true });
   }
 
   isOuchLayoutTunerRequested() {
@@ -720,7 +729,20 @@ export class GameScene extends Phaser.Scene {
         padding: { left: 5, right: 5, top: 3, bottom: 3 },
       }
     ).setOrigin(0.5).setDepth(DEPTH.ui + 1);
-    this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
+    this.angerBonusSuperLabel = this.add.text(
+      this.angerBonusBadge.x,
+      this.angerBonusBadge.y - 14,
+      "SUPER",
+      {
+        fontFamily: "Arial Black, Arial",
+        fontSize: "9px",
+        color: "#ff3b30",
+        stroke: "#170806",
+        strokeThickness: 2,
+        letterSpacing: 1.5,
+      }
+    ).setOrigin(0.5, 1).setDepth(DEPTH.ui + 2).setVisible(false);
+    this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT, rainbow: false };
 
     this.createMainGameSpeedControl();
 
@@ -862,11 +884,12 @@ export class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     };
 
-    this.lifeSegments = [1, 2, 3].map((life, index) => {
+    this.lifeSegments = [1, 2, 3, 4].map((life, index) => {
       const segment = this.add.image(left + 26 + index * 40, bottom + 64, `bonus_life_${life}`)
         .setScale(LIFE_SEGMENT_SCALE)
         .setDepth(DEPTH.ui);
       segment.lifeActive = true;
+      segment.lifeIndex = index;
       return segment;
     });
     this.lifeLabels = this.lifeSegments.map((segment, index) => this.add.text(segment.x, segment.y, String(index + 1), {
@@ -1010,10 +1033,10 @@ export class GameScene extends Phaser.Scene {
       const slot = layout.slots[index];
       const numberSprite = this.add.text(layout.numberX, slot?.y ?? layout.startY, `x${value}`, {
         fontFamily: "Arial Black, Arial",
-        fontSize: "14px",
-        color: "#e7c581",
+        fontSize: `${OUCH_LADDER_MULTIPLIER_FONT_SIZE}px`,
+        color: "#fff1c4",
         stroke: "#1a1007",
-        strokeThickness: 2,
+        strokeThickness: OUCH_LADDER_MULTIPLIER_STROKE,
       }).setOrigin(0, 0.5).setDepth(DEPTH.symbols + 4);
       this.damageMeterEntries.push({
         value,
@@ -1395,6 +1418,44 @@ export class GameScene extends Phaser.Scene {
           .setAlpha(numberAlpha)
           .setScale((entry.baseScale || 1) * numberScale);
         }
+      } else if (entry.numberSprite && this.damageMeterUsesOuchLadder) {
+        const ladderColor = this.getDamageMultiplierCssColor(entry);
+        let numberColor = ladderColor;
+        let numberStroke = "#1a1007";
+        let numberScale = 1;
+        let strokeThickness = OUCH_LADDER_MULTIPLIER_STROKE;
+
+        if (isPassed && isBanked) {
+          numberColor = "#ffe5a0";
+          numberStroke = "#5a3d08";
+          numberScale = 0.96;
+        } else if (isPassed) {
+          numberColor = "#d4dcc8";
+          numberScale = 0.94;
+        } else if (isActive) {
+          numberColor = "#fff8dc";
+          numberStroke = "#3b1d08";
+          numberScale = 1.14;
+          strokeThickness = 4;
+        } else if (isNext) {
+          numberColor = "#fff3c4";
+          numberStroke = "#482406";
+          numberScale = 1.1;
+          strokeThickness = 3.5;
+        } else {
+          numberColor = ladderColor;
+          numberScale = 1.02;
+        }
+
+        entry.numberSprite
+          .setColor(numberColor)
+          .setStroke(numberStroke, strokeThickness)
+          .setAlpha(1)
+          .setScale((entry.baseScale || 1) * numberScale)
+          .clearTint();
+        if (isActive || isNext) {
+          this.children.bringToTop(entry.numberSprite);
+        }
       } else if (entry.numberSprite) {
         const baseScale = entry.baseScale || this.damageMeterReelScale || 1;
         entry.numberSprite
@@ -1448,7 +1509,9 @@ export class GameScene extends Phaser.Scene {
     const duration = fast ? 68 : 140;
     const pulseTargets = this.damageMeterOrientation === "bonus"
       ? [this.damageMeterActiveNumber].filter(Boolean)
-      : [entry.marker, entry.label].filter(Boolean);
+      : this.damageMeterUsesOuchLadder
+        ? [entry.numberSprite].filter(Boolean)
+        : [entry.marker, entry.label].filter(Boolean);
     await Promise.all(pulseTargets.map((object) => this.tweenPromise({
       targets: object,
       scaleX: object.scaleX * scaleBoost,
@@ -2737,13 +2800,386 @@ export class GameScene extends Phaser.Scene {
     return Promise.all(sparks);
   }
 
-  launchAngerMeterOrb(fromX, fromY, target, delay = 0, { lead = false, duration = null } = {}) {
-    const colors = lead ? [0xff5835, 0xe21a16, 0x59000a] : [0xd81d19, 0x8f0610, 0x2d0005];
+  getRainbowAngerColor(index = 0, max = ANGER_SEGMENT_COUNT) {
+    const safeMax = Math.max(1, Number(max) || ANGER_SEGMENT_COUNT);
+    const ratio = Phaser.Math.Clamp(Number(index) / Math.max(1, safeMax - 1), 0, 1);
+    const paletteIndex = ratio * (RAINBOW_ANGER_COLORS.length - 1);
+    const lower = Math.floor(paletteIndex);
+    const upper = Math.min(RAINBOW_ANGER_COLORS.length - 1, lower + 1);
+    const blend = paletteIndex - lower;
+    const from = Phaser.Display.Color.ValueToColor(RAINBOW_ANGER_COLORS[lower]);
+    const to = Phaser.Display.Color.ValueToColor(RAINBOW_ANGER_COLORS[upper]);
+    const mixed = Phaser.Display.Color.Interpolate.ColorWithColor(from, to, 100, Math.round(blend * 100));
+    return Phaser.Display.Color.GetColor(mixed.r, mixed.g, mixed.b);
+  }
+
+  getUnicornCrushOrigin(crushedCells = [], unicornCrushEvent = null) {
+    const event = unicornCrushEvent
+      || crushedCells.find((cell) => cell.isUnicorn || Number(cell.symbol) === 14);
+    if (!event) return null;
+    const reel = Number(event.reel);
+    const row = Number(event.row);
+    const sprite = this.reelSprites?.[reel]?.[row];
+    if (sprite?.active) {
+      return { x: sprite.x, y: sprite.y };
+    }
+    return getCellCenter(reel, row);
+  }
+
+  startUnicornCloudParticleDrift(particle, cloud, {
+    radiusX = 14,
+    radiusY = 12,
+    duration = 2600,
+    delay = 0,
+    wobbleAngle = 0,
+  } = {}) {
+    if (!particle?.active || !cloud) return null;
+
+    const anchorX = particle.x;
+    const anchorY = particle.y;
+    const driftSign = () => (Math.random() < 0.5 ? -1 : 1);
+    const driftX = Phaser.Math.Between(Math.round(radiusX * 0.45), radiusX) * driftSign();
+    const driftY = Phaser.Math.Between(Math.round(radiusY * 0.45), radiusY) * driftSign();
+    const tweenConfig = {
+      targets: particle,
+      x: anchorX + driftX,
+      y: anchorY + driftY,
+      duration: Phaser.Math.Between(duration * 0.88, duration * 1.12),
+      delay,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    };
+    if (wobbleAngle) {
+      tweenConfig.angle = particle.angle + wobbleAngle;
+    }
+    const tween = this.tweens.add(tweenConfig);
+    cloud.tweens.push(tween);
+    return tween;
+  }
+
+  createUnicornRainbowCloud(x, y) {
+    this.destroyUnicornRainbowCloud({ immediate: true });
+
+    const cloud = {
+      x,
+      y,
+      particles: [],
+      tweens: [],
+      idleTimer: null,
+    };
+    const palette = RAINBOW_ANGER_COLORS;
+
+    const coreCount = 22;
+    for (let index = 0; index < coreCount; index += 1) {
+      const color = palette[index % palette.length];
+      const puff = this.add.ellipse(
+        x + Phaser.Math.Between(-16, 16),
+        y + Phaser.Math.Between(-14, 14),
+        Phaser.Math.Between(16, 32),
+        Phaser.Math.Between(14, 26),
+        color,
+        Phaser.Math.FloatBetween(0.16, 0.3)
+      )
+        .setDepth(DEPTH.stompVfx)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.18);
+      cloud.particles.push(puff);
+      cloud.tweens.push(this.tweens.add({
+        targets: puff,
+        scaleX: Phaser.Math.FloatBetween(1.5, 2.5),
+        scaleY: Phaser.Math.FloatBetween(1.3, 2.1),
+        duration: Phaser.Math.Between(150, 230),
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          this.startUnicornCloudParticleDrift(puff, cloud, {
+            radiusX: 10,
+            radiusY: 8,
+            duration: 3200,
+            delay: Phaser.Math.Between(0, 180),
+          });
+        },
+      }));
+    }
+
+    const mist = this.add.circle(x, y, 20, 0xffffff, 0.2)
+      .setDepth(DEPTH.stompVfx - 0.1)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(0.25);
+    cloud.particles.push(mist);
+    cloud.tweens.push(this.tweens.add({
+      targets: mist,
+      scaleX: 2.4,
+      scaleY: 2.4,
+      duration: 190,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        this.startUnicornCloudParticleDrift(mist, cloud, {
+          radiusX: 8,
+          radiusY: 7,
+          duration: 3600,
+          delay: Phaser.Math.Between(0, 220),
+        });
+      },
+    }));
+
+    const ringCount = 14;
+    for (let index = 0; index < ringCount; index += 1) {
+      const color = palette[(index + 3) % palette.length];
+      const angle = (Math.PI * 2 * index) / ringCount;
+      const radius = Phaser.Math.Between(8, 24);
+      const puff = this.add.ellipse(
+        x + Math.cos(angle) * radius,
+        y + Math.sin(angle) * radius,
+        Phaser.Math.Between(10, 20),
+        Phaser.Math.Between(8, 16),
+        color,
+        Phaser.Math.FloatBetween(0.12, 0.24)
+      )
+        .setDepth(DEPTH.stompVfx)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.12);
+      cloud.particles.push(puff);
+      cloud.tweens.push(this.tweens.add({
+        targets: puff,
+        scaleX: Phaser.Math.FloatBetween(1.3, 2.0),
+        scaleY: Phaser.Math.FloatBetween(1.2, 1.8),
+        duration: Phaser.Math.Between(180, 300),
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          this.startUnicornCloudParticleDrift(puff, cloud, {
+            radiusX: 14,
+            radiusY: 11,
+            duration: 3000,
+            delay: Phaser.Math.Between(0, 200),
+            wobbleAngle: Phaser.Math.Between(-10, 10),
+          });
+        },
+      }));
+    }
+
+    const spreadCount = 22;
+    for (let index = 0; index < spreadCount; index += 1) {
+      const color = palette[(index + 2) % palette.length];
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const startRadius = Phaser.Math.Between(4, 18);
+      const endRadius = Phaser.Math.Between(42, 92);
+      const startX = x + Math.cos(angle) * startRadius;
+      const startY = y + Math.sin(angle) * startRadius;
+      const puff = this.add.ellipse(
+        startX,
+        startY,
+        Phaser.Math.Between(8, 18),
+        Phaser.Math.Between(7, 14),
+        color,
+        Phaser.Math.FloatBetween(0.1, 0.2)
+      )
+        .setDepth(DEPTH.stompVfx)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.08);
+      cloud.particles.push(puff);
+      cloud.tweens.push(this.tweens.add({
+        targets: puff,
+        x: x + Math.cos(angle) * endRadius,
+        y: y + Math.sin(angle) * endRadius - Phaser.Math.Between(6, 22),
+        scaleX: Phaser.Math.FloatBetween(1.4, 2.3),
+        scaleY: Phaser.Math.FloatBetween(1.2, 2.0),
+        duration: Phaser.Math.Between(380, 620),
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          this.startUnicornCloudParticleDrift(puff, cloud, {
+            radiusX: 22,
+            radiusY: 16,
+            duration: 3400,
+            delay: Phaser.Math.Between(0, 260),
+            wobbleAngle: Phaser.Math.Between(-14, 14),
+          });
+        },
+      }));
+    }
+
+    const outerSpreadCount = 16;
+    for (let index = 0; index < outerSpreadCount; index += 1) {
+      const color = palette[(index + 5) % palette.length];
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const startRadius = Phaser.Math.Between(16, 34);
+      const endRadius = Phaser.Math.Between(68, 118);
+      const startX = x + Math.cos(angle) * startRadius;
+      const startY = y + Math.sin(angle) * startRadius;
+      const wisp = this.add.ellipse(
+        startX,
+        startY,
+        Phaser.Math.Between(6, 14),
+        Phaser.Math.Between(5, 11),
+        color,
+        Phaser.Math.FloatBetween(0.08, 0.16)
+      )
+        .setDepth(DEPTH.stompVfx)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.06);
+      cloud.particles.push(wisp);
+      cloud.tweens.push(this.tweens.add({
+        targets: wisp,
+        x: x + Math.cos(angle) * endRadius,
+        y: y + Math.sin(angle) * endRadius - Phaser.Math.Between(8, 28),
+        scaleX: Phaser.Math.FloatBetween(1.6, 2.6),
+        scaleY: Phaser.Math.FloatBetween(1.4, 2.2),
+        duration: Phaser.Math.Between(520, 820),
+        ease: "Sine.easeOut",
+        onComplete: () => {
+          this.startUnicornCloudParticleDrift(wisp, cloud, {
+            radiusX: 28,
+            radiusY: 20,
+            duration: 4000,
+            delay: Phaser.Math.Between(0, 320),
+            wobbleAngle: Phaser.Math.Between(-16, 16),
+          });
+        },
+      }));
+    }
+
+    const driftMoteCount = 12;
+    for (let index = 0; index < driftMoteCount; index += 1) {
+      const color = palette[index % palette.length];
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const distance = Phaser.Math.Between(55, 105);
+      const mote = this.add.circle(
+        x + Phaser.Math.Between(-10, 10),
+        y + Phaser.Math.Between(-8, 8),
+        Phaser.Math.Between(3, 6),
+        color,
+        Phaser.Math.FloatBetween(0.1, 0.18)
+      )
+        .setDepth(DEPTH.stompVfx)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.5);
+      cloud.particles.push(mote);
+      cloud.tweens.push(this.tweens.add({
+        targets: mote,
+        x: mote.x + Math.cos(angle) * distance,
+        y: mote.y + Math.sin(angle) * distance - Phaser.Math.Between(12, 36),
+        scaleX: Phaser.Math.FloatBetween(1.2, 2.0),
+        scaleY: Phaser.Math.FloatBetween(1.2, 2.0),
+        alpha: Phaser.Math.FloatBetween(0.04, 0.1),
+        duration: Phaser.Math.Between(640, 980),
+        ease: "Sine.easeOut",
+        onComplete: () => {
+          this.startUnicornCloudParticleDrift(mote, cloud, {
+            radiusX: 34,
+            radiusY: 24,
+            duration: 4600,
+            delay: Phaser.Math.Between(0, 400),
+          });
+        },
+      }));
+    }
+
+    cloud.idleTimer = this.time.addEvent({
+      delay: 680,
+      loop: true,
+      callback: () => {
+        const live = cloud.particles.filter((particle) => particle?.active);
+        if (!live.length) return;
+        const target = Phaser.Utils.Array.GetRandom(live);
+        if (!target?.active) return;
+        const baseAlpha = target.alpha;
+        this.tweens.add({
+          targets: target,
+          alpha: Math.min(0.42, baseAlpha + 0.1),
+          duration: 320,
+          yoyo: true,
+          ease: "Sine.easeInOut",
+        });
+      },
+    });
+
+    this.activeUnicornCloud = cloud;
+    return cloud;
+  }
+
+  getUnicornCloudLaunchOrigin() {
+    const cloud = this.activeUnicornCloud;
+    if (!cloud) return null;
+    const radius = Phaser.Math.Between(8, 32);
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    return {
+      x: cloud.x + Math.cos(angle) * radius,
+      y: cloud.y + Math.sin(angle) * radius,
+    };
+  }
+
+  destroyUnicornRainbowCloud({ immediate = false } = {}) {
+    const cloud = this.activeUnicornCloud;
+    if (!cloud) return Promise.resolve();
+    this.activeUnicornCloud = null;
+    cloud.idleTimer?.remove(false);
+    cloud.tweens.forEach((tween) => tween?.stop());
+    if (immediate) {
+      cloud.particles.forEach((particle) => particle?.destroy());
+      return Promise.resolve();
+    }
+    return this.fadeUnicornRainbowCloud(cloud);
+  }
+
+  dismissUnicornRainbowCloud(duration = 720) {
+    const cloud = this.activeUnicornCloud;
+    if (!cloud) return Promise.resolve();
+    this.activeUnicornCloud = null;
+    return this.fadeUnicornRainbowCloud(cloud, duration);
+  }
+
+  fadeUnicornRainbowCloud(cloud, duration = 720) {
+    if (!cloud) return Promise.resolve();
+    cloud.idleTimer?.remove(false);
+    cloud.tweens.forEach((tween) => tween?.stop());
+
+    const live = cloud.particles.filter((particle) => particle?.active);
+    if (!live.length) return Promise.resolve();
+
+    return Promise.all(live.map((particle) => this.tweenPromise({
+      targets: particle,
+      alpha: 0,
+      scaleX: particle.scaleX * 1.25,
+      scaleY: particle.scaleY * 1.25,
+      duration: Phaser.Math.Between(duration * 0.85, duration * 1.15),
+      ease: "Quad.easeOut",
+      onComplete: () => particle.destroy(),
+    })));
+  }
+
+  vanishUnicornIntoCloud(sprite, cloudX, cloudY, reel, row) {
+    if (!sprite?.active) return Promise.resolve();
+    return this.tweenPromise({
+      targets: sprite,
+      x: cloudX,
+      y: cloudY,
+      scaleX: sprite.scaleX * 0.3,
+      scaleY: sprite.scaleY * 0.3,
+      alpha: 0,
+      duration: 80,
+      ease: "Quad.easeIn",
+      onComplete: () => {
+        sprite.destroy();
+        if (Number.isFinite(reel) && Number.isFinite(row)) {
+          this.reelSprites[reel][row] = null;
+        }
+      },
+    });
+  }
+
+  launchAngerMeterOrb(fromX, fromY, target, delay = 0, { lead = false, duration = null, palette = "anger" } = {}) {
+    const colors = palette === "rainbow"
+      ? [
+        this.getRainbowAngerColor(0, RAINBOW_ANGER_COLORS.length),
+        this.getRainbowAngerColor(2, RAINBOW_ANGER_COLORS.length),
+        this.getRainbowAngerColor(4, RAINBOW_ANGER_COLORS.length),
+      ]
+      : (lead ? [0xff5835, 0xe21a16, 0x59000a] : [0xd81d19, 0x8f0610, 0x2d0005]);
     const orb = this.add.circle(fromX, fromY, lead ? 9 : Phaser.Math.Between(4, 7), colors[0], 0.96)
       .setDepth(DEPTH.angerVfx)
       .setBlendMode(Phaser.BlendModes.ADD);
     const stopTrail = this.attachMotionTrail(orb, {
-      color: lead ? 0xff2415 : colors[1],
+      color: palette === "rainbow" ? colors[1] : (lead ? 0xff2415 : colors[1]),
       radius: lead ? 7 : Phaser.Math.Between(3, 5),
       depth: DEPTH.angerVfx,
       intervalMs: lead ? 10 : 14,
@@ -2778,7 +3214,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  createAngerMeterArc(fromX, fromY, target) {
+  createAngerMeterArc(fromX, fromY, target, { palette = "anger" } = {}) {
     const controlX = (fromX + target.x) * 0.5 + Phaser.Math.Between(-18, 18);
     const controlY = fromY + (target.y - fromY) * 0.42 - Phaser.Math.Between(40, 78);
     const curve = new Phaser.Curves.QuadraticBezier(
@@ -2789,8 +3225,10 @@ export class GameScene extends Phaser.Scene {
     const glow = this.add.graphics().setDepth(DEPTH.angerVfx - 1).setBlendMode(Phaser.BlendModes.ADD);
     const core = this.add.graphics().setDepth(DEPTH.angerVfx).setBlendMode(Phaser.BlendModes.ADD);
     const points = curve.getPoints(22);
-    glow.lineStyle(12, 0xb40012, 0.34);
-    core.lineStyle(4, 0xff241d, 0.96);
+    const glowColor = palette === "rainbow" ? 0x8f7bff : 0xb40012;
+    const coreColor = palette === "rainbow" ? 0xffd166 : 0xff241d;
+    glow.lineStyle(12, glowColor, palette === "rainbow" ? 0.42 : 0.34);
+    core.lineStyle(4, coreColor, 0.96);
     [glow, core].forEach((graphic) => {
       graphic.beginPath();
       graphic.moveTo(points[0].x, points[0].y);
@@ -2863,14 +3301,16 @@ export class GameScene extends Phaser.Scene {
     weak = false,
     orbStagger = 38,
     fast = false,
+    palette = "anger",
   } = {}) {
     const target = this.getAngerSegmentTarget(targetSegmentIndex);
     const streamCount = weak ? 3 : 4;
-    if (!weak) this.createAngerMeterArc(fromX, fromY, target);
+    if (!weak) this.createAngerMeterArc(fromX, fromY, target, { palette });
     await Promise.all(Array.from({ length: streamCount }, (_, index) => (
       this.launchAngerMeterOrb(fromX, fromY, target, index * orbStagger, {
         lead: !weak && index === 0,
         duration: fast ? 170 : null,
+        palette,
       })
     )));
     if (weak) {
@@ -2935,10 +3375,15 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.reelSprites[reel]?.[row];
     if (!sprite) return killEvent;
     const isAnimal = cell.isAnimal === true;
+    const isUnicorn = cell.isUnicorn === true || Number(cell.symbol) === 14;
     const { x, y } = sprite;
     const groundY = this.getStompGroundY(y);
 
-    if (isAnimal) {
+    if (isUnicorn) {
+      this.createUnicornRainbowCloud(x, y);
+      await this.vanishUnicornIntoCloud(sprite, x, y, reel, row);
+      return killEvent;
+    } else if (isAnimal) {
       this.playAnimalCrushSfx();
       this.spawnBloodBurst(x, y, groundY);
       this.spawnGibs(x, y, groundY);
@@ -2974,6 +3419,58 @@ export class GameScene extends Phaser.Scene {
       .filter((cell) => cell.isAnimal)
       .map((cell) => this.getAnimalKillEvent(animalKillEvents, cell));
     await this.presentAnimalAngerReactions(animalEvents, angerReactorPositions);
+  }
+
+  async presentUnicornSuperBonusOvercharge(fromX, fromY) {
+    const start = Number(this.angerMeterState?.count) || 0;
+    if (start >= ANGER_SEGMENT_COUNT) {
+      await this.dismissUnicornRainbowCloud();
+      return;
+    }
+
+    const fast = this.fastForwardRequested;
+    const stepCount = ANGER_SEGMENT_COUNT - start;
+    await this.waitForPresentation(fast ? 80 : 180, { skippable: !fast });
+
+    try {
+      for (let step = 0; step < stepCount; step += 1) {
+        const count = start + step + 1;
+        const isFinal = count === ANGER_SEGMENT_COUNT;
+        const ramp = (step + 1) / stepCount;
+        const burst = ramp > 0.45;
+        const origin = this.getUnicornCloudLaunchOrigin() || { x: fromX, y: fromY };
+        await this.launchAngerMeterStream(origin.x, origin.y, count - 1, {
+          orbStagger: fast ? 10 : 16,
+          fast: true,
+          palette: "rainbow",
+        });
+        if (!burst) {
+          const target = this.getAngerSegmentTarget(count - 1);
+          await this.spawnAngerImpactSpark(target.x, target.y, { weak: false });
+        }
+        await this.updateAngerMeter({
+          count,
+          max: ANGER_SEGMENT_COUNT,
+          explode: isFinal,
+          rainbow: true,
+        });
+
+        if (isFinal) {
+          await this.waitForPresentation(fast ? 140 : 420, { skippable: !fast });
+          continue;
+        }
+
+        const progress = step / Math.max(1, stepCount - 2);
+        const eased = progress * progress * progress;
+        const waitMs = Phaser.Math.Linear(280, 32, eased);
+        await this.waitForPresentation(
+          fast ? Math.max(48, waitMs * 0.22) : waitMs,
+          { skippable: !fast }
+        );
+      }
+    } finally {
+      await this.dismissUnicornRainbowCloud();
+    }
   }
 
   async presentAnimalKillAngerOvercharge(reactorPositions = []) {
@@ -3069,13 +3566,75 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  stopSuperBonusRainbowTween() {
+    if (this.superBonusRainbowTimer) {
+      this.superBonusRainbowTimer.remove(false);
+      this.superBonusRainbowTimer = null;
+    }
+    if (this.superBonusRainbowPulseTween) {
+      this.superBonusRainbowPulseTween.stop();
+      this.superBonusRainbowPulseTween.remove();
+      this.superBonusRainbowPulseTween = null;
+    }
+    if (this.angerBonusSuperLabel) {
+      this.angerBonusSuperLabel.setScale(1).setAlpha(1);
+    }
+  }
+
+  colorIntToHex(value) {
+    return `#${(Number(value) >>> 0).toString(16).padStart(6, "0").slice(-6)}`;
+  }
+
+  syncSuperBonusBadgeLabel(show = false) {
+    const badge = this.angerBonusBadge;
+    const label = this.angerBonusSuperLabel;
+    if (!badge || !label) return;
+
+    if (!show) {
+      this.stopSuperBonusRainbowTween();
+      label.setVisible(false);
+      return;
+    }
+
+    label.setPosition(badge.x, badge.y - 8).setVisible(true);
+
+    if (!this.superBonusRainbowTimer) {
+      let colorIndex = 0;
+      this.superBonusRainbowTimer = this.time.addEvent({
+        delay: 110,
+        loop: true,
+        callback: () => {
+          if (!this.angerBonusSuperLabel?.visible) return;
+          const color = RAINBOW_ANGER_COLORS[colorIndex % RAINBOW_ANGER_COLORS.length];
+          this.angerBonusSuperLabel.setColor(this.colorIntToHex(color));
+          colorIndex += 1;
+        },
+      });
+    }
+
+    if (!this.superBonusRainbowPulseTween && this.tweens) {
+      this.superBonusRainbowPulseTween = this.tweens.add({
+        targets: label,
+        scaleX: 1.08,
+        scaleY: 1.08,
+        alpha: 0.82,
+        duration: 220,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
+  }
+
   syncAngerBonusBadge(count = 0, max = ANGER_SEGMENT_COUNT) {
     const bonusReady = Number(count) >= Math.max(1, Number(max) || ANGER_SEGMENT_COUNT);
+    const isSuperBonusWin = bonusReady && this.angerMeterState?.rainbow === true;
     const badge = this.angerBonusBadge;
     if (!badge) return;
 
     if (!bonusReady) {
       this.stopAngerBonusPulse();
+      this.syncSuperBonusBadgeLabel(false);
       badge
         .setColor("#a96648")
         .setBackgroundColor("#351712")
@@ -3088,6 +3647,15 @@ export class GameScene extends Phaser.Scene {
       .setColor("#fff2a8")
       .setBackgroundColor("#a62d18")
       .setAlpha(1);
+
+    if (isSuperBonusWin) {
+      this.stopAngerBonusPulse();
+      badge.setScale(1);
+      this.syncSuperBonusBadgeLabel(true);
+      return;
+    }
+
+    this.syncSuperBonusBadgeLabel(false);
     if (this.angerBonusPulseTween || !this.tweens) return;
     this.angerBonusPulseTween = this.tweens.add({
       targets: badge,
@@ -5146,6 +5714,8 @@ export class GameScene extends Phaser.Scene {
     animalKillEvents = [],
     angerReactorPositions = [],
     bonusTriggered = false,
+    superBonusTriggered = false,
+    unicornCrushEvent = null,
     teaseMs = 500,
     pauseMs = 450,
     winCapReached = false,
@@ -5223,12 +5793,22 @@ export class GameScene extends Phaser.Scene {
         await this.pullStompFootOut(foot, startY, footScale);
         return;
       }
-      if (bonusTriggered) {
+      if (superBonusTriggered) {
+        const cloud = this.activeUnicornCloud;
+        const origin = cloud
+          ? { x: cloud.x, y: cloud.y }
+          : this.getUnicornCrushOrigin(crushedCells, unicornCrushEvent);
+        if (origin) {
+          await this.presentUnicornSuperBonusOvercharge(origin.x, origin.y);
+        } else {
+          await this.dismissUnicornRainbowCloud();
+        }
+      } else if (bonusTriggered) {
         await this.presentAnimalKillAngerOvercharge(angerReactorPositions);
       }
     }
 
-    await this.resolveAnimalAngerMood(bonusTriggered);
+    await this.resolveAnimalAngerMood(bonusTriggered || superBonusTriggered);
 
     await this.tweenPromise({
       targets: foot,
@@ -5260,6 +5840,8 @@ export class GameScene extends Phaser.Scene {
       animalKillEvents: stompEvent.animalKillEvents,
       angerReactorPositions: stompEvent.angerReactorPositions,
       bonusTriggered: stompEvent.bonusTriggered,
+      superBonusTriggered: stompEvent.superBonusTriggered,
+      unicornCrushEvent: stompEvent.unicornCrushEvent,
       teaseMs: Number(stompEvent.teaseMs) || 500,
       pauseMs: Number(stompEvent.pauseMs) || 450,
       winCapReached,
@@ -5463,11 +6045,19 @@ export class GameScene extends Phaser.Scene {
     const effectX = handX;
     const effectY = handY - CELL_SIZE * 0.05;
     const groundY = this.getStompGroundY(handY);
+    const isUnicorn = cell.isUnicorn === true || Number(cell.symbol) === 14;
+    const isAnimal = cell.isAnimal === true;
 
-    this.playAnimalCrushSfx();
-    this.spawnBloodBurst(effectX, effectY, groundY);
-    this.spawnGibs(effectX, effectY, groundY);
-    this.spawnCoinDrop(effectX, effectY, groundY, cell);
+    if (isUnicorn) {
+      this.createUnicornRainbowCloud(effectX, effectY);
+      await this.vanishUnicornIntoCloud(sprite, effectX, effectY, reel, row);
+      return;
+    } else if (isAnimal) {
+      this.playAnimalCrushSfx();
+      this.spawnBloodBurst(effectX, effectY, groundY);
+      this.spawnGibs(effectX, effectY, groundY);
+      this.spawnCoinDrop(effectX, effectY, groundY, cell);
+    }
 
     const crushTween = this.tweenPromise({
       targets: sprite,
@@ -5646,9 +6236,30 @@ export class GameScene extends Phaser.Scene {
     await this.hideCrushGiantBackground(420);
 
     if (crushEvent.bonusTriggered) {
-      await this.presentAnimalKillAngerOvercharge(angerReactorPositions);
+      if (crushEvent.superBonusTriggered) {
+        const cloud = this.activeUnicornCloud;
+        const origin = cloud
+          ? { x: cloud.x, y: cloud.y }
+          : this.getUnicornCrushOrigin(crushedCells, crushEvent.unicornCrushEvent);
+        if (origin) {
+          await this.presentUnicornSuperBonusOvercharge(origin.x, origin.y);
+        } else {
+          await this.dismissUnicornRainbowCloud();
+        }
+      } else {
+        await this.presentAnimalKillAngerOvercharge(angerReactorPositions);
+      }
     }
     await this.resolveAnimalAngerMood(crushEvent.bonusTriggered);
+  }
+
+  syncLifeSegmentSlotVisibility() {
+    const safeMax = Math.max(1, Number(this.bonusMaxLives) || 3);
+    this.lifeSegments?.forEach((segment, index) => {
+      const isVisibleSlot = index < safeMax;
+      segment?.setVisible(isVisibleSlot);
+      this.lifeLabels?.[index]?.setVisible(isVisibleSlot);
+    });
   }
 
   setBonusUiVisible(visible) {
@@ -5656,6 +6267,7 @@ export class GameScene extends Phaser.Scene {
     this.bonusUi?.forEach((item) => item?.setVisible(visible));
     this.damageMeterObjects?.forEach((item) => item?.setVisible(visible));
     if (visible) {
+      this.syncLifeSegmentSlotVisibility();
       this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
       this.damageMeterStatusText?.setVisible(Boolean(this.damageMeterStatusText?.text));
     }
@@ -5667,6 +6279,12 @@ export class GameScene extends Phaser.Scene {
     this.angerLabel?.setVisible(visible);
     this.angerMeterCaption?.setVisible(visible);
     this.angerBonusBadge?.setVisible(visible);
+    if (!visible) {
+      this.angerBonusSuperLabel?.setVisible(false);
+    } else {
+      const { count = 0, max = ANGER_SEGMENT_COUNT } = this.angerMeterState || {};
+      this.syncAngerBonusBadge(count, max);
+    }
     this.angerSegments?.forEach((segment) => segment.setVisible(visible));
   }
 
@@ -5688,9 +6306,15 @@ export class GameScene extends Phaser.Scene {
 
   async updateLifeMeter(lives = 0, maxLives = 3) {
     const safeMax = Math.max(1, Number(maxLives) || 3);
+    this.bonusMaxLives = safeMax;
     const safeLives = Phaser.Math.Clamp(Number(lives) || 0, 0, safeMax);
     const pops = [];
     this.lifeSegments?.forEach((segment, index) => {
+      const isVisibleSlot = index < safeMax;
+      segment.setVisible(isVisibleSlot);
+      this.lifeLabels?.[index]?.setVisible(isVisibleSlot);
+      if (!isVisibleSlot) return;
+
       const active = index < safeLives;
       const changed = segment.lifeActive !== active;
       segment.lifeActive = active;
@@ -6332,22 +6956,31 @@ export class GameScene extends Phaser.Scene {
     const max = Math.max(1, Number(angerMeter.max) || ANGER_SEGMENT_COUNT);
     const count = Phaser.Math.Clamp(Number(angerMeter.count) || 0, 0, max);
     const litCount = this.getLitAngerSegmentCount(count, max);
-    this.angerMeterState = { count, max };
+    const useRainbow = angerMeter.rainbow === true;
+    this.angerMeterState = { count, max, rainbow: useRainbow };
     await Promise.all(this.angerSegments.map((segment, index) => {
       const active = index < litCount;
       let fillColor = 0x341912;
       if (active) {
-        const rage = max <= 1 ? 1 : index / (max - 1);
-        const blended = Phaser.Display.Color.Interpolate.ColorWithColor(
-          Phaser.Display.Color.ValueToColor(0xe34a2d),
-          Phaser.Display.Color.ValueToColor(0x5b0b12),
-          100,
-          Math.round(rage * 100)
-        );
-        fillColor = Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b);
+        if (useRainbow) {
+          fillColor = this.getRainbowAngerColor(index, max);
+        } else {
+          const rage = max <= 1 ? 1 : index / (max - 1);
+          const blended = Phaser.Display.Color.Interpolate.ColorWithColor(
+            Phaser.Display.Color.ValueToColor(0xe34a2d),
+            Phaser.Display.Color.ValueToColor(0x5b0b12),
+            100,
+            Math.round(rage * 100)
+          );
+          fillColor = Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b);
+        }
       }
       segment.setFillStyle(fillColor, active ? 1 : 0.9);
-      segment.setStrokeStyle(active ? 2 : 1, active ? 0xffc07a : 0x9b4b2b, active ? 1 : 0.85);
+      segment.setStrokeStyle(
+        active ? 2 : 1,
+        active ? (useRainbow ? this.getRainbowAngerColor(index + 1, max) : 0xffc07a) : 0x9b4b2b,
+        active ? 1 : 0.85
+      );
       segment.setScale(1, 1);
       return Promise.resolve();
     }));
@@ -6437,7 +7070,8 @@ export class GameScene extends Phaser.Scene {
   resetAngerMeter() {
     this.stopAngerBlink();
     this.stopAngerBonusPulse();
-    this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT };
+    this.stopSuperBonusRainbowTween();
+    this.angerMeterState = { count: 0, max: ANGER_SEGMENT_COUNT, rainbow: false };
     this.angerSegments?.forEach((segment) => {
       segment.setFillStyle(0x341912, 0.9);
       segment.setStrokeStyle(1, 0x9b4b2b, 0.85);
@@ -6568,7 +7202,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateFreespinCounter(remaining) {
-    this.updateLifeMeter(remaining, 3);
+    this.updateLifeMeter(remaining, this.bonusMaxLives ?? 3);
   }
 
   hideFreespinCounter() {

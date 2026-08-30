@@ -44,6 +44,9 @@ class GameController {
     this._msgIdCounter = 0;
     this.preventGamePlay = false;
     this.continuationAction = null;
+    this.pendingFeatureBuy = null;
+    this.armedFeatureBuy = null;
+    this.defaultTicketStrategy = "normal";
     this.devTicketModeEnabled = this.isDevTicketModeEnabled();
     const initialStrategies = this.normalizeTicketStrategies(
       this.roundGateway?.getTicketStrategies?.() || [this.gameConfig?.mathStyle || "normal"]
@@ -80,11 +83,23 @@ class GameController {
   }
 
   resolveTicketStrategy(preferred, options = this.ticketStrategyOptions) {
-    const ids = options.map((opt) => opt.id);
+    const fromOptions = options.map((opt) => opt.id);
+    const fromFeatureBuy = this.getFeatureBuyOptions().map((entry) => entry.strategyId);
+    const fromGateway = this.normalizeTicketStrategies(
+      this.roundGateway?.getTicketStrategies?.() || []
+    ).map((entry) => entry.id);
+    const ids = [...new Set([...fromOptions, ...fromFeatureBuy, ...fromGateway, "normal"])];
+
     if (preferred && ids.includes(preferred)) {
       return preferred;
     }
     return ids[0] || "normal";
+  }
+
+  resolveSpinTicketStrategy() {
+    return this.pendingFeatureBuy?.strategyId
+      ?? this.armedFeatureBuy?.strategyId
+      ?? this.ticketStrategy;
   }
 
   getTicketStrategies() {
@@ -100,6 +115,79 @@ class GameController {
     this.ticketStrategy = next;
     this.gameConfig.mathStyle = next;
     return next;
+  }
+
+  resetTicketStrategy() {
+    return this.setTicketStrategy(this.defaultTicketStrategy);
+  }
+
+  getFeatureBuyOptions() {
+    const options = this.settings?.featureBuy?.options;
+    return Array.isArray(options) ? [...options] : [];
+  }
+
+  isFeatureBuyEnabled() {
+    return this.settings?.featureBuy?.enabled === true && this.getFeatureBuyOptions().length > 0;
+  }
+
+  armFeatureBuy({ strategyId, cost, label }) {
+    if (this.preventGamePlay) return false;
+
+    const uiState = this.stateStore.getUiState();
+    if (!uiState.spinState || this.hasContinuationPending()) return false;
+
+    const normalizedCost = this.roundCurrency(Number(cost));
+    if (!Number.isFinite(normalizedCost) || normalizedCost <= 0) return false;
+    if (this.balance < normalizedCost) return false;
+
+    const option = this.getFeatureBuyOptions().find((entry) => entry.strategyId === strategyId);
+    if (!option || option.cost !== normalizedCost) return false;
+
+    this.armedFeatureBuy = {
+      strategyId,
+      cost: normalizedCost,
+      label: label || option.label || strategyId
+    };
+    this.ticketStrategy = strategyId;
+    this.gameConfig.mathStyle = strategyId;
+    return true;
+  }
+
+  getArmedFeatureBuy() {
+    return this.armedFeatureBuy ? { ...this.armedFeatureBuy } : null;
+  }
+
+  clearArmedFeatureBuy() {
+    const hadArmed = !!this.armedFeatureBuy;
+    this.armedFeatureBuy = null;
+    this.pendingFeatureBuy = null;
+    this.resetTicketStrategy();
+    return hadArmed;
+  }
+
+  activateArmedFeatureBuyForSpin() {
+    if (!this.armedFeatureBuy || this.pendingFeatureBuy) return false;
+    this.pendingFeatureBuy = { ...this.armedFeatureBuy };
+    return true;
+  }
+
+  clearPendingFeatureBuy({ resetStrategy = true, clearArmed = true } = {}) {
+    const hadPending = !!this.pendingFeatureBuy;
+    this.pendingFeatureBuy = null;
+    if (clearArmed) {
+      this.armedFeatureBuy = null;
+    }
+    if (resetStrategy) {
+      this.resetTicketStrategy();
+    }
+    return hadPending;
+  }
+
+  consumePendingFeatureBuyCost(fallbackBetSize = 1) {
+    if (this.pendingFeatureBuy) {
+      return this.pendingFeatureBuy.cost;
+    }
+    return null;
   }
 
   cycleTicketStrategy() {
@@ -165,7 +253,8 @@ class GameController {
     }
 
     const requestedDefault = devSettings.defaultTicketStrategy;
-    this.setTicketStrategy(requestedDefault || this.ticketStrategy);
+    this.defaultTicketStrategy = this.resolveTicketStrategy(requestedDefault || this.ticketStrategy);
+    this.setTicketStrategy(this.defaultTicketStrategy);
 
     if (typeof devSettings.ticketModeEnabled === "boolean") {
       this.devTicketModeEnabled = devSettings.ticketModeEnabled;
@@ -258,16 +347,19 @@ class GameController {
 
     if (this.replaysToExecuteBeforeRng.length === 0) {
       this.roundStopActionsHandled.clear();
+      this.activateArmedFeatureBuyForSpin();
       const betSize = this.stateStore.getUiState().betSize;
       const newReplays = await this.roundGateway.fetchRoundStates({
         betSize,
-        ticketStrategy: this.ticketStrategy
+        ticketStrategy: this.resolveSpinTicketStrategy(),
+        featureBuyStrategy: this.pendingFeatureBuy?.strategyId ?? null,
       });
       this.replaysToExecuteBeforeRng.push(...newReplays);
       this.amountOfReplaysCompleted = 0;
       this.amountOfReplays = this.replaysToExecuteBeforeRng.length;
 
       if (this.amountOfReplays === 0) {
+        this.pendingFeatureBuy = null;
         this.clearContinuationAction();
         this.stateStore.setUiState((prev) => ({ ...prev, spinState: true, betSwap: true }));
         return;
@@ -287,10 +379,12 @@ class GameController {
 
       if (resp.executedAction === "spin") {
         const activeUiState = this.stateStore.getUiState();
-        const roundCost = this.resolveRoundCost(resp, activeUiState.betSize);
+        const featureBuyCost = this.consumePendingFeatureBuyCost(activeUiState.betSize);
+        const roundCost = featureBuyCost ?? this.resolveRoundCost(resp, activeUiState.betSize);
         this.balance = this.roundCurrency(this.balance - roundCost);
         this.gamerounds++;
         this.stateStore.setUiState((prev) => ({ ...prev, gamerounds: this.gamerounds }));
+        this.clearPendingFeatureBuy({ resetStrategy: !this.armedFeatureBuy, clearArmed: false });
       }
 
       this.stateStore.setUiState((prev) => ({ ...prev, balance: this.balance }));
