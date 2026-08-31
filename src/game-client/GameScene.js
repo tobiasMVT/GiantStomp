@@ -293,6 +293,8 @@ export class GameScene extends Phaser.Scene {
     this.activeGolfJackpotMusic = null;
     this.golfJackpotMusicStartedAt = null;
     this.golfswingHudHidden = false;
+    this.golfUnicornCloudDismissTimer = null;
+    this.superGolfWheelDustTimer = null;
     this.stompLandedCoins = [];
     this.stompCoinsRegistry = new Set();
     this.stompCoinLaunchPromises = [];
@@ -333,6 +335,9 @@ export class GameScene extends Phaser.Scene {
     this.angerBonusSuperLabel = null;
     this.superBonusRainbowTimer = null;
     this.superBonusRainbowPulseTween = null;
+    this.superBonusFrameSign = null;
+    this.superBonusFrameSignTween = null;
+    this.isSuperBonusActive = false;
     this.activeUnicornCloud = null;
     this.damageMeterObjects = [];
     this.damageMeterEntries = [];
@@ -1004,7 +1009,75 @@ export class GameScene extends Phaser.Scene {
       ...Object.values(this.trapLightGroups)
         .flatMap(({ icon, valueLabel, lights }) => [icon, valueLabel, ...lights]),
     ];
+    this.createSuperBonusFrameSign();
     this.setBonusUiVisible(false);
+  }
+
+  createSuperBonusFrameSign() {
+    const x = GRID_OFFSET_X + GRID_WIDTH_PX - 10;
+    const y = GRID_OFFSET_Y + 8;
+    const superLabel = this.add.text(x, y, "SUPER", {
+      fontFamily: "Arial Black, Arial",
+      fontSize: "8px",
+      color: "#c97a6a",
+      stroke: "#170806",
+      strokeThickness: 2,
+      letterSpacing: 1.2,
+    }).setOrigin(1, 0).setDepth(DEPTH.ui + 1).setAlpha(0.9);
+
+    const bonusBadge = this.add.text(x, y + 12, "BONUS", {
+      fontFamily: "Arial Black, Arial",
+      fontSize: "10px",
+      color: "#e0c4a8",
+      backgroundColor: "#3d2218",
+      stroke: "#170806",
+      strokeThickness: 2,
+      padding: { left: 4, right: 4, top: 2, bottom: 2 },
+    }).setOrigin(1, 0).setDepth(DEPTH.ui + 1).setAlpha(0.92);
+
+    this.superBonusFrameSign = { superLabel, bonusBadge };
+    this.setSuperBonusFrameSignVisible(false);
+  }
+
+  setSuperBonusFrameSignVisible(visible) {
+    const sign = this.superBonusFrameSign;
+    if (!sign) return;
+    sign.superLabel?.setVisible(visible);
+    sign.bonusBadge?.setVisible(visible);
+    if (visible) {
+      this.startSuperBonusFrameSignPulse();
+      return;
+    }
+    this.stopSuperBonusFrameSignTween();
+    sign.superLabel?.setAlpha(0.9);
+    sign.bonusBadge?.setAlpha(0.92);
+  }
+
+  startSuperBonusFrameSignPulse() {
+    const sign = this.superBonusFrameSign;
+    if (!sign || this.superBonusFrameSignTween?.isPlaying?.()) return;
+    this.stopSuperBonusFrameSignTween();
+    this.superBonusFrameSignTween = this.tweens.add({
+      targets: [sign.superLabel, sign.bonusBadge],
+      alpha: 0.78,
+      duration: 2400,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+  }
+
+  stopSuperBonusFrameSignTween() {
+    this.superBonusFrameSignTween?.stop?.();
+    this.superBonusFrameSignTween?.remove?.();
+    this.superBonusFrameSignTween = null;
+  }
+
+  syncSuperBonusFrameSign() {
+    const show = this.isInBonusMode
+      && this.isBonusUiVisible
+      && this.isSuperBonusActive === true;
+    this.setSuperBonusFrameSignVisible(show);
   }
 
   createDamageMeter(segments = []) {
@@ -2422,6 +2495,20 @@ export class GameScene extends Phaser.Scene {
     const y = startY ?? center.y;
     const valueText = formatCashSymbolValue(symbol);
     if (!valueText) {
+      if (Number(symbol) === UNICORN_SYMBOL) {
+        const { sprite } = this.createUnicornSymbolContainer(x, y, texture, {
+          depth: DEPTH.symbols,
+          mask: this.reelMask,
+        });
+        Object.assign(sprite, {
+          symbolId: Number(symbol),
+          reel,
+          row,
+          baseTextureKey: texture,
+        });
+        return sprite;
+      }
+
       const sprite = this.add.image(x, y, texture)
         .setScale(SYMBOL_SCALE)
         .setDepth(DEPTH.symbols);
@@ -2465,19 +2552,83 @@ export class GameScene extends Phaser.Scene {
     return sprite;
   }
 
+  createUnicornSuperBonusBadge(offsetY = -40) {
+    const badge = this.add.text(0, offsetY, "SUPER", {
+      fontFamily: "Arial Black, Arial",
+      fontSize: "11px",
+      color: "#ff3b30",
+      backgroundColor: "#351712",
+      stroke: "#170806",
+      strokeThickness: 3,
+      padding: { left: 5, right: 5, top: 3, bottom: 3 },
+    }).setOrigin(0.5);
+
+    let showSuper = true;
+    const swapTimer = this.time.addEvent({
+      delay: 520,
+      loop: true,
+      callback: () => {
+        if (!badge?.active) return;
+        showSuper = !showSuper;
+        badge.setText(showSuper ? "SUPER" : "BONUS");
+        badge.setColor(showSuper ? "#ff3b30" : "#fff2a8");
+        badge.setBackgroundColor(showSuper ? "#351712" : "#a62d18");
+      },
+    });
+
+    return { badge, swapTimer };
+  }
+
+  createUnicornSymbolContainer(x, y, textureKey, {
+    scale = SYMBOL_SCALE,
+    depth = DEPTH.symbols,
+    alpha = 1,
+    mask = null,
+  } = {}) {
+    const image = this.add.image(0, 0, textureKey);
+    const { badge, swapTimer } = this.createUnicornSuperBonusBadge(-40);
+    const sprite = this.add.container(x, y, [image, badge])
+      .setScale(scale)
+      .setAlpha(alpha)
+      .setDepth(depth);
+    if (mask) sprite.setMask(mask);
+    sprite.setSize(image.width, image.height);
+    sprite.setTint = (color) => {
+      image.setTint(color);
+      return sprite;
+    };
+    sprite.clearTint = () => {
+      image.clearTint();
+      return sprite;
+    };
+    sprite.unicornSuperBonusSwapTimer = swapTimer;
+    return { sprite, image, badge };
+  }
+
+  destroyUnicornSuperBonusSign(target) {
+    target?.unicornSuperBonusSwapTimer?.remove?.(false);
+    if (target) target.unicornSuperBonusSwapTimer = null;
+  }
+
   async slideOutOldSymbols() {
     this.clearHighlights();
     const sprites = this.reelSprites.flat().filter(Boolean);
     this.reelSprites = Array.from({ length: REELS }, () => Array(ROWS).fill(null));
-    await Promise.all(sprites.map((sprite, index) => this.tweenPromise({
+    await Promise.all(sprites.map((sprite, index) => {
+      this.destroyUnicornSuperBonusSign(sprite);
+      return this.tweenPromise({
         targets: sprite,
         y: GRID_OFFSET_Y + GRID_HEIGHT_PX + CELL_SIZE * 1.5,
         alpha: 0,
         duration: 280,
         delay: index * 10,
         ease: "Cubic.easeIn",
-        onComplete: () => sprite.destroy(),
-      })));
+        onComplete: () => {
+          this.destroyUnicornSuperBonusSign(sprite);
+          sprite.destroy();
+        },
+      });
+    }));
     // The new board is always normal; keep the previous emotion until its sprites have exited.
     this.animalEmotion = "normal";
   }
@@ -3141,7 +3292,7 @@ export class GameScene extends Phaser.Scene {
     return tween;
   }
 
-  createUnicornRainbowCloud(x, y) {
+  createUnicornRainbowCloud(x, y, { depth = DEPTH.stompVfx } = {}) {
     this.destroyUnicornRainbowCloud({ immediate: true });
 
     const cloud = {
@@ -3152,6 +3303,7 @@ export class GameScene extends Phaser.Scene {
       idleTimer: null,
     };
     const palette = RAINBOW_ANGER_COLORS;
+    const particleDepth = depth;
 
     const coreCount = 22;
     for (let index = 0; index < coreCount; index += 1) {
@@ -3164,7 +3316,7 @@ export class GameScene extends Phaser.Scene {
         color,
         Phaser.Math.FloatBetween(0.16, 0.3)
       )
-        .setDepth(DEPTH.stompVfx)
+        .setDepth(particleDepth)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setScale(0.18);
       cloud.particles.push(puff);
@@ -3186,7 +3338,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const mist = this.add.circle(x, y, 20, 0xffffff, 0.2)
-      .setDepth(DEPTH.stompVfx - 0.1)
+      .setDepth(particleDepth - 0.1)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setScale(0.25);
     cloud.particles.push(mist);
@@ -3219,7 +3371,7 @@ export class GameScene extends Phaser.Scene {
         color,
         Phaser.Math.FloatBetween(0.12, 0.24)
       )
-        .setDepth(DEPTH.stompVfx)
+        .setDepth(particleDepth)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setScale(0.12);
       cloud.particles.push(puff);
@@ -3257,7 +3409,7 @@ export class GameScene extends Phaser.Scene {
         color,
         Phaser.Math.FloatBetween(0.1, 0.2)
       )
-        .setDepth(DEPTH.stompVfx)
+        .setDepth(particleDepth)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setScale(0.08);
       cloud.particles.push(puff);
@@ -3297,7 +3449,7 @@ export class GameScene extends Phaser.Scene {
         color,
         Phaser.Math.FloatBetween(0.08, 0.16)
       )
-        .setDepth(DEPTH.stompVfx)
+        .setDepth(particleDepth)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setScale(0.06);
       cloud.particles.push(wisp);
@@ -3333,7 +3485,7 @@ export class GameScene extends Phaser.Scene {
         color,
         Phaser.Math.FloatBetween(0.1, 0.18)
       )
-        .setDepth(DEPTH.stompVfx)
+        .setDepth(particleDepth)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setScale(0.5);
       cloud.particles.push(mote);
@@ -3405,6 +3557,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   dismissUnicornRainbowCloud(duration = 720) {
+    this.cancelGolfUnicornCloudDismiss();
     const cloud = this.activeUnicornCloud;
     if (!cloud) return Promise.resolve();
     this.activeUnicornCloud = null;
@@ -3430,6 +3583,49 @@ export class GameScene extends Phaser.Scene {
     })));
   }
 
+  spreadFadeUnicornRainbowCloud(cloud, duration = 1000) {
+    if (!cloud) return Promise.resolve();
+    cloud.idleTimer?.remove(false);
+    cloud.tweens.forEach((tween) => tween?.stop());
+
+    const live = cloud.particles.filter((particle) => particle?.active);
+    if (!live.length) return Promise.resolve();
+
+    return Promise.all(live.map((particle) => {
+      const dx = particle.x - cloud.x;
+      const dy = particle.y - cloud.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const spread = Phaser.Math.FloatBetween(70, 150);
+      return this.tweenPromise({
+        targets: particle,
+        x: particle.x + (dx / dist) * spread + Phaser.Math.Between(-28, 28),
+        y: particle.y + (dy / dist) * spread + Phaser.Math.Between(-22, 22),
+        alpha: 0,
+        scaleX: particle.scaleX * Phaser.Math.FloatBetween(1.35, 1.85),
+        scaleY: particle.scaleY * Phaser.Math.FloatBetween(1.35, 1.85),
+        duration: Phaser.Math.Between(duration * 0.85, duration * 1.15),
+        ease: "Quad.easeOut",
+        onComplete: () => particle.destroy(),
+      });
+    }));
+  }
+
+  cancelGolfUnicornCloudDismiss() {
+    this.golfUnicornCloudDismissTimer?.remove(false);
+    this.golfUnicornCloudDismissTimer = null;
+  }
+
+  scheduleGolfUnicornCloudDismiss(delayMs = 2500, fadeDuration = 1000) {
+    this.cancelGolfUnicornCloudDismiss();
+    this.golfUnicornCloudDismissTimer = this.time.delayedCall(delayMs, () => {
+      this.golfUnicornCloudDismissTimer = null;
+      const cloud = this.activeUnicornCloud;
+      if (!cloud) return;
+      this.activeUnicornCloud = null;
+      this.spreadFadeUnicornRainbowCloud(cloud, fadeDuration);
+    });
+  }
+
   vanishUnicornIntoCloud(sprite, cloudX, cloudY, reel, row) {
     if (!sprite?.active) return Promise.resolve();
     return this.tweenPromise({
@@ -3442,6 +3638,7 @@ export class GameScene extends Phaser.Scene {
       duration: 80,
       ease: "Quad.easeIn",
       onComplete: () => {
+        this.destroyUnicornSuperBonusSign(sprite);
         sprite.destroy();
         if (Number.isFinite(reel) && Number.isFinite(row)) {
           this.reelSprites[reel][row] = null;
@@ -6787,7 +6984,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   clearGolfswingPresentation() {
-    (this.golfswingObjects || []).forEach((item) => item?.destroy?.());
+    this.cancelGolfUnicornCloudDismiss();
+    this.stopSuperGolfWheelRainbowDust();
+    (this.golfswingObjects || []).forEach((item) => {
+      this.destroyUnicornSuperBonusSign(item);
+      item?.destroy?.();
+    });
     this.golfswingObjects = [];
     this.stopGolfswingAudio();
   }
@@ -6936,6 +7138,7 @@ export class GameScene extends Phaser.Scene {
       onUpdate: syncGrabbedSymbol,
       onComplete: () => {
         openHand?.destroy();
+        this.destroyUnicornSuperBonusSign(grabbedSymbol);
         grabbedSymbol?.destroy();
       },
     });
@@ -6972,14 +7175,30 @@ export class GameScene extends Phaser.Scene {
     const animalKey = this.getAnimalEmotionTexture(cell.symbol) || String(cell.symbol);
     let projectileAnimal = null;
     if (this.textures.exists(animalKey)) {
-      projectileAnimal = this.add.image(
-        GAME_LOGICAL_WIDTH * 0.72,
-        GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
-        animalKey
-      )
-        .setScale(SYMBOL_SCALE * 0.22)
-        .setAlpha(0.75)
-        .setDepth(DEPTH.golfswingFx + 0.5);
+      if (Number(cell.symbol) === UNICORN_SYMBOL) {
+        const created = this.createUnicornSymbolContainer(
+          GAME_LOGICAL_WIDTH * 0.72,
+          GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
+          animalKey,
+          {
+            scale: SYMBOL_SCALE * 0.22,
+            alpha: 0.75,
+            depth: DEPTH.golfswingFx + 0.5,
+            mask: null,
+          }
+        );
+        projectileAnimal = created.sprite;
+        Object.assign(projectileAnimal, { symbolId: UNICORN_SYMBOL });
+      } else {
+        projectileAnimal = this.add.image(
+          GAME_LOGICAL_WIDTH * 0.72,
+          GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
+          animalKey
+        )
+          .setScale(SYMBOL_SCALE * 0.22)
+          .setAlpha(0.75)
+          .setDepth(DEPTH.golfswingFx + 0.5);
+      }
       this.golfswingObjects.push(projectileAnimal);
     }
 
@@ -7230,6 +7449,71 @@ export class GameScene extends Phaser.Scene {
     const musicDurationMs = this.getGolfJackpotMusicDurationMs();
     const minTailMs = this.fastForwardRequested ? 280 : 900;
     return Math.min(GOLF_JACKPOT_DRUM_START_MS, Math.max(0, musicDurationMs - minTailMs));
+  }
+
+  startSuperGolfWheelRainbowDust(wheel, wheelRadius = 180) {
+    this.stopSuperGolfWheelRainbowDust();
+    if (!wheel?.active) return;
+
+    const fast = this.fastForwardRequested;
+    const palette = RAINBOW_ANGER_COLORS;
+
+    const spawnBurst = () => {
+      if (!wheel?.active) {
+        this.stopSuperGolfWheelRainbowDust();
+        return;
+      }
+
+      const burstCount = fast ? 2 : 5;
+      const wheelScale = Math.max(wheel.scaleX, wheel.scaleY, 0.01);
+      const effectiveRadius = wheelRadius * wheelScale;
+
+      for (let index = 0; index < burstCount; index += 1) {
+        const rimAngle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const rotatedAngle = rimAngle + wheel.rotation;
+        const rimX = wheel.x + Math.cos(rotatedAngle) * effectiveRadius;
+        const rimY = wheel.y + Math.sin(rotatedAngle) * effectiveRadius;
+        const color = palette[Phaser.Math.Between(0, palette.length - 1)];
+        const puff = this.add.ellipse(
+          rimX,
+          rimY,
+          Phaser.Math.Between(8, 16),
+          Phaser.Math.Between(6, 12),
+          color,
+          Phaser.Math.FloatBetween(0.14, 0.28)
+        )
+          .setDepth(DEPTH.golfswingFx + 0.85)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setScale(Phaser.Math.FloatBetween(0.35, 0.55));
+
+        this.golfswingObjects.push(puff);
+
+        const spreadDist = Phaser.Math.Between(fast ? 28 : 48, fast ? 58 : 96);
+        this.tweens.add({
+          targets: puff,
+          x: rimX + Math.cos(rotatedAngle) * spreadDist + Phaser.Math.Between(-12, 12),
+          y: rimY + Math.sin(rotatedAngle) * spreadDist + Phaser.Math.Between(-10, 10),
+          alpha: 0,
+          scaleX: puff.scaleX * Phaser.Math.FloatBetween(1.6, 2.4),
+          scaleY: puff.scaleY * Phaser.Math.FloatBetween(1.6, 2.4),
+          duration: Phaser.Math.Between(fast ? 260 : 420, fast ? 420 : 760),
+          ease: "Quad.easeOut",
+          onComplete: () => puff.destroy(),
+        });
+      }
+    };
+
+    spawnBurst();
+    this.superGolfWheelDustTimer = this.time.addEvent({
+      delay: fast ? 95 : 145,
+      loop: true,
+      callback: spawnBurst,
+    });
+  }
+
+  stopSuperGolfWheelRainbowDust() {
+    this.superGolfWheelDustTimer?.remove(false);
+    this.superGolfWheelDustTimer = null;
   }
 
   async spinGolfJackpotWheelToWin(wheel, finalRotation) {
@@ -7554,8 +7838,12 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(fast ? 120 : 260, 0.012);
 
     if (isSuperGolfswing) {
-      this.createUnicornRainbowCloud(impactX, impactY);
+      this.createUnicornRainbowCloud(impactX, impactY, { depth: DEPTH.golfswingFx - 0.6 });
       await this.vanishUnicornIntoCloud(projectileAnimal, impactX, impactY);
+      this.scheduleGolfUnicornCloudDismiss(
+        fast ? 1200 : 2500,
+        fast ? 650 : 1000
+      );
       return;
     }
 
@@ -7702,6 +7990,25 @@ export class GameScene extends Phaser.Scene {
     this.golfswingObjects.push(wheel);
 
     const fast = this.fastForwardRequested;
+
+    let superWheelHalo = null;
+    if (event.isSuperGolfswing) {
+      superWheelHalo = this.add.circle(zoneCenter.x, zoneCenter.y, wheelRadius + 14, 0xffffff, 0.05)
+        .setDepth(DEPTH.golfswingFx - 0.35)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.golfswingObjects.push(superWheelHalo);
+      this.tweens.add({
+        targets: superWheelHalo,
+        scaleX: 1.06,
+        scaleY: 1.06,
+        alpha: 0.11,
+        duration: fast ? 520 : 860,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
+
     const morphDuration = fast ? 220 : 520;
 
     const greenFadeTarget = greenContainer?.active ? greenContainer : null;
@@ -7798,7 +8105,12 @@ export class GameScene extends Phaser.Scene {
       () => animalSlide?.fadeOut?.(fast ? 260 : 520)
     );
 
+    if (event.isSuperGolfswing) {
+      this.startSuperGolfWheelRainbowDust(wheel, wheelRadius);
+    }
+
     await this.spinGolfJackpotWheelToWin(wheel, finalRotation);
+    this.stopSuperGolfWheelRainbowDust();
     fadeTimer.remove(false);
 
     const winningSlice = sliceNodes[winIndex] || null;
@@ -7973,6 +8285,9 @@ export class GameScene extends Phaser.Scene {
       this.syncLifeSegmentSlotVisibility();
       this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
       this.damageMeterStatusText?.setVisible(Boolean(this.damageMeterStatusText?.text));
+      this.syncSuperBonusFrameSign();
+    } else {
+      this.setSuperBonusFrameSignVisible(false);
     }
     this.freespinText?.setVisible(false);
     this.setAngerUiVisible(!visible && !this.isInBonusMode && !this.isPostBonusOuch);
@@ -8315,6 +8630,8 @@ export class GameScene extends Phaser.Scene {
       values: { ...(trapMeter?.values || {}) },
       power: Number(trapMeter?.power) || 0,
     };
+    this.isSuperBonusActive = bonusState?.isSuperBonus === true || maxLives >= 4;
+    this.syncSuperBonusFrameSign();
   }
 
   getBonusHoleAnchor() {
@@ -8922,6 +9239,8 @@ export class GameScene extends Phaser.Scene {
   async leaveBonus() {
     if (!this.isInBonusMode && !this.isPostBonusOuch) return;
     this.stopOuchLadderNextBlink();
+    this.stopSuperBonusFrameSignTween();
+    this.isSuperBonusActive = false;
     this.isInBonusMode = false;
     this.isPostBonusOuch = false;
     this.ouchTrapPowerMultiplierIndex = null;

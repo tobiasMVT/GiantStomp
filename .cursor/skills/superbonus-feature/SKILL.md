@@ -12,6 +12,8 @@ description: Rainbow unicorn wild (symbol 14) and guaranteed 4-life superbonus e
 - Acts as a **wild** in `evaluateWays` — substitutes for paying symbols 1–10.
 - Asset: `src/game-client/assets/giantstomp/unicorn_trans.png` (board + 4th life sigil).
 - Client plays `unicorn_appear` (`giant-video-game-character-dialogue-vocalization-i-can-smell-you.mp3`) whenever symbol 14 lands on the board, independent of bonus or feature outcomes.
+- A compact **SUPER / BONUS** badge (anger-meter badge style) sits above the unicorn on the board. Text alternates every ~520ms. It is parented to the symbol container, follows golfswing grabs, and is destroyed when the unicorn vanishes into rainbow dust.
+- During superbonus, a calmer **SUPER** above **BONUS** sign sits at the top-right of the reel frame (same badge styling, muted colors, static labels with a slow alpha breathe). It shows while bonus UI is visible and hides on regular bonus exit.
 
 ## Entry
 

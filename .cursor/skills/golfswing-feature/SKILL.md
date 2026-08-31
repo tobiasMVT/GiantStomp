@@ -71,10 +71,11 @@ Presentation (`GameScene.js`):
 2. Reel frame + symbols fade; placeholder `goldswingBackground` label top-right; small distant animal sprite for the tee shot.
 3. Large centered hit zone ellipse; landing point comes from server `crosshairEndX/Y`. The aim path is **built backward from that pixel** — 2–3 sinus in/out loops with **per-loop ease-in/out**. The **tee shot fires around 86%** through the aim while the crosshair is still sliding into place.
 4. **Bat swing:** animal always arcs toward the crosshair landing point; on hit it splats there, on miss it **flies through the crosshair, rushes past the camera**, then is destroyed off screen.
-5. **On hit:** animal splats at impact (blood for animals; super unicorn vanishes into a rainbow cloud on screen contact only). Super golf skips blood slide trails. Cloud dismisses when presentation ends.
-6. **On miss:** one continuous shot through the crosshair and past the camera; animal is destroyed only after exiting below screen; `MISS` label, win 0.
-7. Win amount + anger meter fade out when the golf scene starts and fade back in when it ends.
-8. Board fades back in; cleanup via `clearGolfswingPresentation`.
+5. **On hit:** animal splats at impact (blood for animals; super unicorn vanishes into a rainbow cloud on screen contact only). Super golf skips blood slide trails. The impact cloud sits behind the wheel, then after ~2.5s spreads outward and fades so it does not cover the jackpot wheel.
+6. **Super jackpot wheel:** rainbow segment colors plus a soft pulsing halo and rim rainbow dust bursts while the wheel spins (unicorn-style motes drifting off the rim).
+7. **On miss:** one continuous shot through the crosshair and past the camera; animal is destroyed only after exiting below screen; `MISS` label, win 0.
+8. Win amount + anger meter fade out when the golf scene starts and fade back in when it ends.
+9. Board fades back in; cleanup via `clearGolfswingPresentation`.
 
 All RNG is server-side; client only animates predetermined outcomes.
 
