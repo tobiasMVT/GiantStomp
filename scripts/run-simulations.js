@@ -53,6 +53,102 @@ const splitRoundTwaByPhase = (states) => {
   return { mainGameWin, bonusWin };
 };
 
+const readMainGameWinComponents = (state) => {
+  const components = {
+    normal: 0,
+    golfswing: 0,
+    superGolfswing: 0,
+    party: 0,
+    crush: 0,
+    stomp: 0,
+  };
+
+  if (state?.isBonus) return components;
+
+  components.stomp = Number(state?.stompEvent?.coinWin) || 0;
+  components.crush = Number(state?.crushEvent?.coinWin) || 0;
+  if (state?.golfswingEvent?.hit) {
+    const jackpotWin = Number(state.golfswingEvent.jackpotWin) || 0;
+    if (state.golfswingEvent.isSuperGolfswing === true) {
+      components.superGolfswing = jackpotWin;
+    } else {
+      components.golfswing = jackpotWin;
+    }
+  }
+
+  const waysWin = Number(state?.winAmount ?? state?.result?.winAmount) || 0;
+  if (state?.partyEvent?.triggered) components.party = waysWin;
+  else components.normal = waysWin;
+
+  return components;
+};
+
+const isSuperBonusRound = (states) =>
+  states.some((state) =>
+    state?.superBonusTriggered === true || state?.bonusState?.isSuperBonus === true);
+
+/** Split round payout into main-game sources and bonus phase (regular vs super). */
+const splitRoundWinBySource = (states) => {
+  const mainGame = {
+    normal: 0,
+    golfswing: 0,
+    superGolfswing: 0,
+    party: 0,
+    crush: 0,
+    stomp: 0,
+  };
+  const bonus = {
+    regular: 0,
+    superBonus: 0,
+  };
+
+  for (const state of states) {
+    const components = readMainGameWinComponents(state);
+    mainGame.normal += components.normal;
+    mainGame.golfswing += components.golfswing;
+    mainGame.superGolfswing += components.superGolfswing;
+    mainGame.party += components.party;
+    mainGame.crush += components.crush;
+    mainGame.stomp += components.stomp;
+  }
+
+  const superBonusRound = isSuperBonusRound(states);
+  let prevTwa = 0;
+  let prevInBonus = false;
+
+  for (const state of states) {
+    const twa = Number(state?.twa) || 0;
+    const delta = twa - prevTwa;
+    if (prevInBonus) {
+      if (superBonusRound) bonus.superBonus += delta;
+      else bonus.regular += delta;
+    }
+    prevTwa = twa;
+    prevInBonus = state?.isBonus === true;
+  }
+
+  return { mainGame, bonus, superBonusRound };
+};
+
+const buildRtpSourceEntry = ({
+  totalPayout,
+  totalStake,
+  sampleCount,
+  parentPayout = null,
+}) => {
+  const rtpPercent = totalStake > 0 ? (totalPayout / totalStake) * 100 : 0;
+  const averageWin = sampleCount > 0 ? totalPayout / sampleCount : 0;
+  const sharePercent = parentPayout > 0 ? (totalPayout / parentPayout) * 100 : null;
+
+  return {
+    totalPayout: Number(totalPayout.toFixed(4)),
+    rtpPercent: fourDecimals(rtpPercent),
+    averageWin: Number(averageWin.toFixed(6)),
+    sampleCount,
+    sharePercent: sharePercent === null ? null : fourDecimals(sharePercent),
+  };
+};
+
 const meanOf = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
 
 const populationVariance = (values, mean) =>
@@ -386,6 +482,14 @@ let totalStake = 0;
 let totalPayout = 0;
 let totalMainGameWin = 0;
 let totalBonusWin = 0;
+let totalMainGameNormalWin = 0;
+let totalMainGameGolfswingWin = 0;
+let totalMainGameSuperGolfswingWin = 0;
+let totalMainGamePartyWin = 0;
+let totalMainGameCrushWin = 0;
+let totalMainGameStompWin = 0;
+let totalRegularBonusWin = 0;
+let totalSuperBonusWin = 0;
 let completedRounds = 0;
 let failedRounds = 0;
 let hitRounds = 0;
@@ -399,6 +503,11 @@ let superBonusRounds = 0;
 let stompFeatureRounds = 0;
 let crushFeatureRounds = 0;
 let partyFeatureRounds = 0;
+let golfswingFeatureRounds = 0;
+let golfswingHitRounds = 0;
+let golfswingMissRounds = 0;
+let totalGolfswingJackpotWin = 0;
+const golfswingJackpotSegmentCounts = {};
 let unicornOnGameAreaRounds = 0;
 let unicornSuperBonusRounds = 0;
 let totalAnimalsCrushed = 0;
@@ -463,6 +572,14 @@ for (let i = 1; i <= rounds; i += 1) {
   maxMainGameWin = Math.max(maxMainGameWin, mainGameWin);
   maxBonusWin = Math.max(maxBonusWin, bonusWin);
 
+  const winBySource = splitRoundWinBySource(states);
+  totalMainGameNormalWin += winBySource.mainGame.normal;
+  totalMainGameGolfswingWin += winBySource.mainGame.golfswing;
+  totalMainGameSuperGolfswingWin += winBySource.mainGame.superGolfswing;
+  totalMainGamePartyWin += winBySource.mainGame.party;
+  totalMainGameCrushWin += winBySource.mainGame.crush;
+  totalMainGameStompWin += winBySource.mainGame.stomp;
+
   const animalsCrushed = countAnimalsCrushedInRound(states);
   animalsCrushedPerRound.push(animalsCrushed);
   totalAnimalsCrushed += animalsCrushed;
@@ -470,6 +587,21 @@ for (let i = 1; i <= rounds; i += 1) {
   if (server.hasStomp(states)) stompFeatureRounds += 1;
   if (server.hasCrush(states)) crushFeatureRounds += 1;
   if (server.hasParty(states)) partyFeatureRounds += 1;
+
+  if (server.hasGolfswing(states)) {
+    golfswingFeatureRounds += 1;
+    const swingState = states.find((state) => state.golfswingEvent?.triggered);
+    const swingEvent = swingState?.golfswingEvent;
+    if (swingEvent?.hit) {
+      golfswingHitRounds += 1;
+      const jackpotWin = Number(swingEvent.jackpotWin) || 0;
+      totalGolfswingJackpotWin += jackpotWin;
+      const segment = String(swingEvent.jackpotSegment ?? 0);
+      golfswingJackpotSegmentCounts[segment] = (golfswingJackpotSegmentCounts[segment] || 0) + 1;
+    } else {
+      golfswingMissRounds += 1;
+    }
+  }
 
   const hadUnicornOnBoard = server.hasUnicornOnGameArea(states);
   if (hadUnicornOnBoard) unicornOnGameAreaRounds += 1;
@@ -483,6 +615,11 @@ for (let i = 1; i <= rounds; i += 1) {
     bonusRounds += 1;
     bonusWinsPerBonusRound.push(bonusWin);
     totalBonusWin += bonusWin;
+    if (winBySource.superBonusRound) {
+      totalSuperBonusWin += winBySource.bonus.superBonus;
+    } else {
+      totalRegularBonusWin += winBySource.bonus.regular;
+    }
     const trapPower = readBonusTrapPower(states, lastState);
     trapPowerPerBonusRound.push(trapPower);
     totalTrapPower += trapPower;
@@ -598,6 +735,83 @@ const unicornToSuperBonusRate = unicornOnGameAreaRounds > 0
   ? unicornSuperBonusRounds / unicornOnGameAreaRounds
   : 0;
 
+const mainGameRtpDistribution = {
+  description: "Main-game RTP split by win source (paid spin phase only). Denominator is total stake across all completed rounds.",
+  normalWins: buildRtpSourceEntry({
+    totalPayout: totalMainGameNormalWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  golfswing: buildRtpSourceEntry({
+    totalPayout: totalMainGameGolfswingWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  superGolfswing: buildRtpSourceEntry({
+    totalPayout: totalMainGameSuperGolfswingWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  party: buildRtpSourceEntry({
+    totalPayout: totalMainGamePartyWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  crush: buildRtpSourceEntry({
+    totalPayout: totalMainGameCrushWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  stomp: buildRtpSourceEntry({
+    totalPayout: totalMainGameStompWin,
+    totalStake,
+    sampleCount: completedRounds,
+    parentPayout: totalMainGameWin,
+  }),
+  componentTotalPayout: Number(
+    (totalMainGameNormalWin
+      + totalMainGameGolfswingWin
+      + totalMainGameSuperGolfswingWin
+      + totalMainGamePartyWin
+      + totalMainGameCrushWin
+      + totalMainGameStompWin).toFixed(4)
+  ),
+  attributionNotes: {
+    normalWins: "winAmount on paid spins without partyEvent.triggered",
+    golfswing: "golfswingEvent.jackpotWin on hit when isSuperGolfswing is false",
+    superGolfswing: "golfswingEvent.jackpotWin on hit when unicorn is picked (isSuperGolfswing true)",
+    party: "winAmount on paid spins with partyEvent.triggered",
+    crush: "crushEvent.coinWin",
+    stomp: "stompEvent.coinWin",
+  },
+};
+
+const bonusRtpDistribution = {
+  description: "Bonus RTP split by entry type. Denominator is total stake across all completed rounds.",
+  regularBonus: buildRtpSourceEntry({
+    totalPayout: totalRegularBonusWin,
+    totalStake,
+    sampleCount: regularBonusRounds,
+    parentPayout: totalBonusWin,
+  }),
+  superBonus: buildRtpSourceEntry({
+    totalPayout: totalSuperBonusWin,
+    totalStake,
+    sampleCount: superBonusRounds,
+    parentPayout: totalBonusWin,
+  }),
+  componentTotalPayout: Number((totalRegularBonusWin + totalSuperBonusWin).toFixed(4)),
+  attributionNotes: {
+    regularBonus: "TWA delta while isBonus is true on non-superbonus rounds",
+    superBonus: "TWA delta while isBonus is true on superbonus rounds",
+  },
+};
+
 const report = {
   config: {
     roundsRequested: rounds,
@@ -632,6 +846,7 @@ const report = {
   mainGame: {
     description: "Win credited while isBonus is false (paid spin and pre-bonus states).",
     ...mainGameStats,
+    rtpDistribution: mainGameRtpDistribution,
     winDistribution: {
       description: "Per-round main-game win (TWA delta while isBonus is false).",
       ...mainGameWinDistribution,
@@ -650,6 +865,7 @@ const report = {
     regularBonusRounds,
     regularBonusFrequency: formatFrequency(regularBonusRounds, completedRounds),
     regularBonusRatePercent: completedRounds > 0 ? twoDecimals((regularBonusRounds / completedRounds) * 100) : 0,
+    rtpDistribution: bonusRtpDistribution,
     ...bonusStats,
     winDistribution: {
       description: "Per bonus-round win (TWA delta while isBonus is true). Buckets: 10-wide to 200, 50-wide to 1000, 100-wide to 2000, 200-wide to 3000, 500-wide to 10000, then 10000+.",
@@ -689,6 +905,36 @@ const report = {
       triggerRatePercent:
         completedRounds > 0 ? twoDecimals((partyFeatureRounds / completedRounds) * 100) : 0,
       frequency: formatFrequency(partyFeatureRounds, completedRounds)
+    },
+    golfswingFeature: {
+      description: "Main-game golf swing when no stomp/crush/party giant and animals exist on board.",
+      detection: "server.hasGolfswing(states): any state with golfswingEvent.triggered",
+      configuredOdds: Number(serverConfig.golfswingFeature?.odds ?? 0),
+      triggeredRounds: golfswingFeatureRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((golfswingFeatureRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(golfswingFeatureRounds, completedRounds),
+      hitRounds: golfswingHitRounds,
+      missRounds: golfswingMissRounds,
+      hitRatePercent: golfswingFeatureRounds > 0
+        ? twoDecimals((golfswingHitRounds / golfswingFeatureRounds) * 100)
+        : 0,
+      hitRateDefinition: "hit rounds / triggered golfswing rounds",
+      totalJackpotWin: Number(totalGolfswingJackpotWin.toFixed(4)),
+      averageJackpotWinOnHit: golfswingHitRounds > 0
+        ? Number((totalGolfswingJackpotWin / golfswingHitRounds).toFixed(6))
+        : 0,
+      jackpotSegmentDistribution: Object.keys(golfswingJackpotSegmentCounts)
+        .map(Number)
+        .filter(Number.isFinite)
+        .sort((left, right) => left - right)
+        .map((segment) => ({
+          segment,
+          count: golfswingJackpotSegmentCounts[String(segment)],
+          percentOfHits: golfswingHitRounds > 0
+            ? fourDecimals((golfswingJackpotSegmentCounts[String(segment)] / golfswingHitRounds) * 100)
+            : 0,
+        })),
     },
     unicornOnGameArea: {
       description: "Paid spin with symbol 14 visible on reels (unicorn injection or dev ticket board).",
@@ -739,6 +985,17 @@ console.log(`RTP:              ${report.metrics.rtpPercent}%`);
 console.log(`Hit rate (tbm):   ${report.metrics.hitRate} (${report.metrics.hitRounds} hit / ${report.metrics.noHitRounds} no-hit)`);
 console.log(`Main game RTP:    ${report.mainGame.rtpPercent}%  (avg win ${report.mainGame.averageWin})`);
 console.log(`Bonus RTP:        ${report.bonus.rtpPercent}%  (avg win ${report.bonus.averageWin})`);
+console.log("\n--- RTP distribution ---");
+console.log("Main game:");
+console.log(`  Normal wins:    ${report.mainGame.rtpDistribution.normalWins.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.normalWins.totalPayout}, ${report.mainGame.rtpDistribution.normalWins.sharePercent}% of main)`);
+console.log(`  Golf swing:     ${report.mainGame.rtpDistribution.golfswing.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.golfswing.totalPayout}, ${report.mainGame.rtpDistribution.golfswing.sharePercent}% of main)`);
+console.log(`  Super golfswing: ${report.mainGame.rtpDistribution.superGolfswing.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.superGolfswing.totalPayout}, ${report.mainGame.rtpDistribution.superGolfswing.sharePercent}% of main)`);
+console.log(`  Party:          ${report.mainGame.rtpDistribution.party.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.party.totalPayout}, ${report.mainGame.rtpDistribution.party.sharePercent}% of main)`);
+console.log(`  Crush:          ${report.mainGame.rtpDistribution.crush.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.crush.totalPayout}, ${report.mainGame.rtpDistribution.crush.sharePercent}% of main)`);
+console.log(`  Stomp:          ${report.mainGame.rtpDistribution.stomp.rtpPercent}%  (payout ${report.mainGame.rtpDistribution.stomp.totalPayout}, ${report.mainGame.rtpDistribution.stomp.sharePercent}% of main)`);
+console.log("Bonus:");
+console.log(`  Regular bonus:  ${report.bonus.rtpDistribution.regularBonus.rtpPercent}%  (payout ${report.bonus.rtpDistribution.regularBonus.totalPayout}, avg win ${report.bonus.rtpDistribution.regularBonus.averageWin}, ${report.bonus.rtpDistribution.regularBonus.sharePercent}% of bonus)`);
+console.log(`  Super bonus:    ${report.bonus.rtpDistribution.superBonus.rtpPercent}%  (payout ${report.bonus.rtpDistribution.superBonus.totalPayout}, avg win ${report.bonus.rtpDistribution.superBonus.averageWin}, ${report.bonus.rtpDistribution.superBonus.sharePercent}% of bonus)`);
 console.log(`Bonus frequency:  ${report.bonus.bonusFrequency} (${report.bonus.bonusRatePercent}%)`);
 console.log(`Superbonus:       ${report.bonus.superBonusFrequency} (${report.bonus.superBonusRatePercent}%, ${report.bonus.superBonusRounds} rounds)`);
 console.log(`Regular bonus:    ${report.bonus.regularBonusFrequency} (${report.bonus.regularBonusRatePercent}%, ${report.bonus.regularBonusRounds} rounds)`);
@@ -749,6 +1006,7 @@ console.log(`Avg final mult:   ${report.bonus.finalMultiplier.average}x`);
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);
 console.log(`Crush feature:    ${report.features.crushFeature.frequency} (${report.features.crushFeature.triggeredRounds} rounds)`);
 console.log(`Party feature:    ${report.features.partyFeature.frequency} (${report.features.partyFeature.triggeredRounds} rounds)`);
+console.log(`Golfswing:        ${report.features.golfswingFeature.frequency} (${report.features.golfswingFeature.triggeredRounds} rounds, ${report.features.golfswingFeature.hitRatePercent}% hit)`);
 console.log(`Animals crushed:  ${report.features.animalsCrushed.total} total, ${report.features.animalsCrushed.averagePerRound} avg/round`);
 console.log(`Animals/trigger:  ${report.features.animalsCrushed.averageOnBonusTriggerRound} avg on bonus-entry spin, ratio ${report.features.animalsCrushed.animalsCrushedPerBonusRatio}`);
 console.log(`Animals/bonus:    ${report.features.animalsCrushed.averageBetweenBonuses} avg crushed between bonuses (${report.features.animalsCrushed.averagePaidSpinsBetweenBonuses} paid spins)`);

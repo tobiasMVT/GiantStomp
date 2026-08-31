@@ -26,6 +26,8 @@ import {
   OUCH_PIT_STEP_DELTA_Y,
   OUCH_UI_OFFSET_Y,
   getOuchDamageMeterLadderLayout,
+  GAME_LOGICAL_WIDTH,
+  GAME_LOGICAL_HEIGHT,
 } from "./config/layoutMetrics";
 
 const REELS = 5;
@@ -90,6 +92,12 @@ function getMultiplierSegmentColor(index, total) {
   return Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b);
 }
 
+function getGolfswingSegmentColor(segmentValue, sortedSegments = []) {
+  const sorted = [...sortedSegments].filter(Number.isFinite).sort((a, b) => a - b);
+  const rankIndex = sorted.indexOf(Number(segmentValue));
+  return getMultiplierSegmentColor(rankIndex >= 0 ? rankIndex : 0, sorted.length || 1);
+}
+
 function blendMultiplierColor(colorInt, factor) {
   const segment = Phaser.Display.Color.ValueToColor(colorInt);
   const base = Phaser.Display.Color.ValueToColor(0x0a0e12);
@@ -102,6 +110,10 @@ function blendMultiplierColor(colorInt, factor) {
 const LIFE_SEGMENT_SCALE = 0.3;
 const ANGER_SEGMENT_COUNT = 10;
 const RAINBOW_ANGER_COLORS = [0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x5ac8fa, 0x5856d6, 0xaf52de];
+
+function getSuperGolfswingSegmentColor(index = 0) {
+  return RAINBOW_ANGER_COLORS[Math.abs(index) % RAINBOW_ANGER_COLORS.length];
+}
 const CONSTRUCTION_SFX = ["construction_1", "construction_2", "construction_3"];
 const ANIMAL_CRUSH_SFX = ["animal_crush_splatter", "animal_crush_gore"];
 const OUCH_STOMP_SFX = ["ouch_stomp1", "ouch_stomp2"];
@@ -122,6 +134,9 @@ const DEPTH = {
   symbols: 10,
   crushGrab: 12,
   crushGrabSymbol: 13,
+  golfswingOverlay: 14,
+  golfswingFx: 15,
+  golfswingGrabSymbol: 13,
   effects: 20,
   stomp: 25,
   stompVfx: 27,
@@ -2671,6 +2686,29 @@ export class GameScene extends Phaser.Scene {
       if (!glow.destroyed) glow.destroy();
     });
     this.highlightGlows.clear();
+  }
+
+  clearHighlightAt(reel, row) {
+    if (!Number.isFinite(reel) || !Number.isFinite(row)) return;
+
+    const sprite = this.reelSprites[reel]?.[row];
+    if (sprite?.active) {
+      this.highlightedSprites.delete(sprite);
+      sprite.clearTint().setScale(SYMBOL_SCALE);
+    }
+
+    const center = getCellCenter(reel, row);
+    const tolerance = CELL_SIZE * 0.55;
+    for (const glow of [...this.highlightGlows]) {
+      if (glow?.destroyed) {
+        this.highlightGlows.delete(glow);
+        continue;
+      }
+      if (Math.abs(glow.x - center.x) <= tolerance && Math.abs(glow.y - center.y) <= tolerance) {
+        glow.destroy();
+        this.highlightGlows.delete(glow);
+      }
+    }
   }
 
   skipHighlightPhase() {
@@ -6137,6 +6175,8 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.reelSprites[reel]?.[row];
     if (!sprite) return;
 
+    this.clearHighlightAt(reel, row);
+
     openHand.setDepth(DEPTH.crushGrab);
     snappedHand.setDepth(DEPTH.crushGrab);
     sprite.setDepth(DEPTH.crushGrabSymbol);
@@ -6251,6 +6291,994 @@ export class GameScene extends Phaser.Scene {
       }
     }
     await this.resolveAnimalAngerMood(crushEvent.bonusTriggered);
+  }
+
+  getGolfswingEasePool() {
+    const easing = Phaser.Math.Easing;
+    return [
+      easing.Quad?.In,
+      easing.Quad?.Out,
+      easing.Cubic?.In,
+      easing.Cubic?.Out,
+      easing.Sine?.InOut,
+      easing.Sine?.Out,
+      easing.Sine?.In,
+    ].filter((easeFn) => typeof easeFn === "function");
+  }
+
+  remapGolfswingSegmentEase(linearT, segments, easeFns = []) {
+    const safeSegments = Math.max(1, Number(segments) || 1);
+    const clamped = Phaser.Math.Clamp(Number(linearT) || 0, 0, 1);
+    if (clamped >= 1) return 1;
+
+    const pool = easeFns.length ? easeFns : this.getGolfswingEasePool();
+    const segmentSize = 1 / safeSegments;
+    const index = Math.min(safeSegments - 1, Math.floor(clamped / segmentSize));
+    const localT = Phaser.Math.Clamp((clamped - index * segmentSize) / segmentSize, 0, 1);
+    const easeFn = pool.length ? pool[index % pool.length] : Phaser.Math.Easing.Linear;
+    const easedLocal = Phaser.Math.Clamp(easeFn(localT), 0, 1);
+    return (index + easedLocal) / safeSegments;
+  }
+
+  golfswingNormToScreen(nx = 0.5, ny = 0.5) {
+    return {
+      x: Number(nx) * GAME_LOGICAL_WIDTH,
+      y: Number(ny) * GAME_LOGICAL_HEIGHT,
+    };
+  }
+
+  getGolfswingZoneRadii(zone = {}) {
+    const radius = Number(zone.radius) || 0.34;
+    return {
+      x: radius * GAME_LOGICAL_WIDTH,
+      y: radius * GAME_LOGICAL_HEIGHT,
+    };
+  }
+
+  isGolfswingInsideHitZone(nx, ny, hitZone = {}) {
+    const dx = Number(nx) - Number(hitZone.x ?? 0.5);
+    const dy = Number(ny) - Number(hitZone.y ?? 0.45);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist <= Number(hitZone.radius ?? 0.34);
+  }
+
+  createGolfswingGreen(zoneCenter, zoneRadii) {
+    const container = this.add.container(zoneCenter.x, zoneCenter.y)
+      .setDepth(DEPTH.golfswingFx);
+
+    const hitZoneRing = this.add.ellipse(
+      0,
+      0,
+      zoneRadii.x * 2.18,
+      zoneRadii.y * 2.18,
+      0x1a4d2e,
+      0.5
+    )
+      .setStrokeStyle(2, 0x123d24, 0.75);
+
+    const hitZoneGfx = this.add.ellipse(
+      0,
+      0,
+      zoneRadii.x * 2,
+      zoneRadii.y * 2,
+      0x2d8f47,
+      0.9
+    )
+      .setStrokeStyle(3, 0x1e6b35, 1);
+
+    const greenHighlight = this.add.ellipse(
+      0,
+      -zoneRadii.y * 0.08,
+      zoneRadii.x * 1.32,
+      zoneRadii.y * 1.15,
+      0x45b86a,
+      0.2
+    );
+
+    container.add([hitZoneRing, hitZoneGfx, greenHighlight]);
+
+    let golfFlag = null;
+    if (this.textures.exists("golf_flag")) {
+      golfFlag = this.add.image(0, 0, "golf_flag").setOrigin(0.5, 1);
+      const targetHeight = Math.min(zoneRadii.x, zoneRadii.y) * 0.9;
+      golfFlag.setScale(targetHeight / golfFlag.height);
+      container.add(golfFlag);
+      container.bringToTop(golfFlag);
+    }
+
+    this.golfswingObjects.push(container);
+    return { greenContainer: container, hitZoneGfx, hitZoneRing, golfFlag };
+  }
+
+  clearGolfswingPresentation() {
+    (this.golfswingObjects || []).forEach((item) => item?.destroy?.());
+    this.golfswingObjects = [];
+  }
+
+  async restoreGolfswingBoardPresentation() {
+    await Promise.all([
+      this.tweenPromise({ targets: this.background, alpha: 1, duration: 320, ease: "Quad.easeInOut" }),
+      this.tweenPromise({ targets: this.reelFrame, alpha: 1, duration: 320, ease: "Quad.easeInOut" }),
+      this.fadeMainGameSymbols(1, 320),
+    ]);
+  }
+
+  getGolfswingGrabSymbolPosition(handX, handY) {
+    return {
+      x: handX + CELL_SIZE * 0.04,
+      y: handY + CELL_SIZE * 0.04,
+    };
+  }
+
+  attachGolfswingGrabbedSymbol(grabbedSymbol, hand, reel, row) {
+    if (!grabbedSymbol?.active || !hand?.active) return () => {};
+
+    this.clearHighlightAt(reel, row);
+    this.highlightedSprites.delete(grabbedSymbol);
+    grabbedSymbol.clearTint?.();
+
+    if (Number.isFinite(reel) && Number.isFinite(row)) {
+      this.reelSprites[reel][row] = null;
+    }
+    grabbedSymbol.clearMask?.();
+    grabbedSymbol
+      .setDepth(DEPTH.crushHand - 1)
+      .setScale(SYMBOL_SCALE * 0.85);
+
+    const syncToHand = () => {
+      if (!grabbedSymbol?.active || !hand?.active) return;
+      const gripPos = this.getGolfswingGrabSymbolPosition(hand.x, hand.y);
+      grabbedSymbol.setPosition(gripPos.x, gripPos.y);
+    };
+
+    syncToHand();
+    return syncToHand;
+  }
+
+  async presentGolfswingGrab(event = {}) {
+    const cell = event.pickedCell || {};
+    const reel = Number(cell.reel);
+    const row = Number(cell.row);
+    if (!Number.isFinite(reel) || !Number.isFinite(row)) return;
+
+    const target = getCellCenter(reel, row);
+    const handScale = this.getCrushHandScale();
+    const enterX = GRID_OFFSET_X - CELL_SIZE * 1.6;
+    const grabX = target.x + CRUSH_HAND_TARGET_OFFSET_X;
+    const grabY = target.y;
+    const fast = this.fastForwardRequested;
+
+    await this.showCrushGiantBackground(fast ? 180 : 520);
+    await this.waitForPresentation(
+      fast ? 90 : Math.max(750, Number(event.teaseMs) || 700),
+      { skippable: !fast }
+    );
+    await this.crossfadeAnimalEmotion("scared", { duration: fast ? 45 : 120 });
+    await this.waitForPresentation(Number(event.pauseMs) || 350, { skippable: !fast });
+
+    const openHand = this.createCrushHand("open_hand", enterX, grabY, handScale)
+      .setDepth(DEPTH.crushHand)
+      .setAlpha(0.98);
+    const grabbedSymbol = this.reelSprites?.[reel]?.[row] || null;
+    let syncGrabbedSymbol = () => {};
+
+    await this.tweenPromise({
+      targets: openHand,
+      x: grabX,
+      y: grabY,
+      angle: 0,
+      duration: fast ? 180 : 420,
+      ease: "Cubic.easeInOut",
+    });
+
+    if (grabbedSymbol?.active) {
+      syncGrabbedSymbol = this.attachGolfswingGrabbedSymbol(grabbedSymbol, openHand, reel, row);
+    }
+
+    await this.presentMiniSqueezeShake(
+      grabbedSymbol?.active ? [openHand, grabbedSymbol] : openHand,
+      fast ? 120 : 280
+    );
+    syncGrabbedSymbol();
+
+    const exitX = this.getCrushHandExitX(enterX);
+    const exitDuration = fast ? 240 : 520;
+    await this.tweenPromise({
+      targets: openHand,
+      x: exitX,
+      duration: exitDuration,
+      ease: "Cubic.easeIn",
+      onUpdate: syncGrabbedSymbol,
+      onComplete: () => {
+        openHand?.destroy();
+        grabbedSymbol?.destroy();
+      },
+    });
+
+    await this.hideCrushGiantBackground(fast ? 160 : 320);
+  }
+
+  async presentGolfswingSceneTransition(event = {}) {
+    this.clearHighlights();
+    const fast = this.fastForwardRequested;
+    await Promise.all([
+      this.tweenPromise({ targets: this.reelFrame, alpha: 0, duration: fast ? 180 : 420, ease: "Quad.easeInOut" }),
+      this.fadeMainGameSymbols(0, fast ? 180 : 420),
+      this.tweenPromise({ targets: this.background, alpha: 0.12, duration: fast ? 180 : 420, ease: "Quad.easeInOut" }),
+    ]);
+
+    const overlay = this.add.container(0, 0).setDepth(DEPTH.golfswingOverlay);
+    const label = this.add.text(
+      GAME_LOGICAL_WIDTH - 18,
+      24,
+      "goldswingBackground",
+      {
+        fontFamily: "Arial",
+        fontSize: "18px",
+        color: "#c8e6ff",
+        stroke: "#0a1420",
+        strokeThickness: 3,
+      }
+    ).setOrigin(1, 0);
+    overlay.add(label);
+
+    const cell = event.pickedCell || {};
+    const animalKey = this.getAnimalEmotionTexture(cell.symbol) || String(cell.symbol);
+    let projectileAnimal = null;
+    if (this.textures.exists(animalKey)) {
+      projectileAnimal = this.add.image(
+        GAME_LOGICAL_WIDTH * 0.72,
+        GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
+        animalKey
+      )
+        .setScale(SYMBOL_SCALE * 0.22)
+        .setAlpha(0.75)
+        .setDepth(DEPTH.golfswingFx + 0.5);
+      this.golfswingObjects.push(projectileAnimal);
+    }
+
+    this.golfswingObjects.push(overlay);
+    return { overlay, projectileAnimal };
+  }
+
+  async presentGolfswingAim(event = {}, {
+    shotTriggerT = 0.86,
+    onShotTrigger = null,
+  } = {}) {
+    const duration = Math.max(800, Number(event.aimDurationMs) || 4000);
+    const fast = this.fastForwardRequested;
+    const aimMs = fast ? Math.min(650, duration * 0.35) : duration;
+    const zone = event.hitZone || { x: 0.5, y: 0.45, radius: 0.34 };
+    const zoneCenter = this.golfswingNormToScreen(zone.x, zone.y);
+    const zoneRadii = this.getGolfswingZoneRadii(zone);
+    const zoneRadiusPx = (zoneRadii.x + zoneRadii.y) / 2;
+    const endPos = this.golfswingNormToScreen(
+      event.crosshairEndX ?? zone.x,
+      event.crosshairEndY ?? event.crosshairY ?? zone.y
+    );
+    const startPos = this.golfswingNormToScreen(0.2, 0.62);
+    const introEnd = fast ? 0.14 : 0.16;
+    const loopCount = fast ? 2 : Phaser.Math.Between(2, 3);
+    const orbitDir = Math.random() < 0.5 ? -1 : 1;
+    const swing = Phaser.Math.FloatBetween(0.28, 0.4);
+    const endNormX = (endPos.x - zoneCenter.x) / zoneRadii.x;
+    const endNormY = (endPos.y - zoneCenter.y) / zoneRadii.y;
+    const landingAngle = Math.atan2(endNormY, endNormX);
+    const landingRadius = Math.hypot(endNormX, endNormY);
+    const loopEases = Array.from({ length: loopCount }, () => {
+      const easePool = this.getGolfswingEasePool();
+      return easePool.length ? Phaser.Math.RND.pick(easePool) : Phaser.Math.Easing.Linear;
+    });
+
+    const getCurvePoint = (curveT) => {
+      const travel = 1 - curveT;
+      const angle = landingAngle - orbitDir * travel * loopCount * Math.PI * 2;
+      const radiusNorm = landingRadius + swing * Math.sin(travel * loopCount * Math.PI * 2);
+      return {
+        x: zoneCenter.x + Math.cos(angle) * zoneRadii.x * radiusNorm,
+        y: zoneCenter.y + Math.sin(angle) * zoneRadii.y * radiusNorm,
+      };
+    };
+
+    const getAimPoint = (t) => {
+      if (t <= introEnd) {
+        const u = (Phaser.Math.Easing.Cubic?.Out || Phaser.Math.Easing.Linear)(t / introEnd);
+        const pathStart = getCurvePoint(0);
+        return {
+          x: Phaser.Math.Linear(startPos.x, pathStart.x, u),
+          y: Phaser.Math.Linear(startPos.y, pathStart.y, u),
+        };
+      }
+      const curveT = (t - introEnd) / (1 - introEnd);
+      const easedCurveT = this.remapGolfswingSegmentEase(curveT, loopCount, loopEases);
+      return getCurvePoint(easedCurveT);
+    };
+
+    const {
+      greenContainer,
+      hitZoneGfx,
+      hitZoneRing,
+    } = this.createGolfswingGreen(zoneCenter, zoneRadii);
+
+    const crosshair = this.add.container(startPos.x, startPos.y).setDepth(DEPTH.golfswingFx + 1);
+    crosshair.add([
+      this.add.circle(0, 0, 14, 0x000000, 0).setStrokeStyle(2, 0xff4444, 0.92),
+      this.add.rectangle(0, 0, 34, 2, 0xff4444).setOrigin(0.5),
+      this.add.rectangle(0, 0, 2, 34, 0xff4444).setOrigin(0.5),
+      this.add.circle(0, 0, 3, 0xff6666, 0.95),
+    ]);
+    this.golfswingObjects.push(crosshair);
+
+    const counter = { t: 0 };
+    let shotTriggered = false;
+    const earlyResult = {
+      greenContainer,
+      hitZoneGfx,
+      hitZoneRing,
+      crosshair,
+      zoneCenter,
+      zoneRadiusPx,
+      zoneRadii,
+      endPos,
+      hitZone: zone,
+    };
+    const triggerT = Phaser.Math.Clamp(Number(shotTriggerT) || 0.86, 0.72, 0.96);
+
+    await this.tweenPromise({
+      targets: counter,
+      t: 1,
+      duration: aimMs,
+      ease: "Linear",
+      onUpdate: () => {
+        const pos = getAimPoint(counter.t);
+        crosshair.setPosition(pos.x, pos.y);
+        if (!shotTriggered && typeof onShotTrigger === "function" && counter.t >= triggerT) {
+          shotTriggered = true;
+          onShotTrigger(earlyResult);
+        }
+      },
+    });
+    crosshair.setPosition(endPos.x, endPos.y).setAngle(0);
+
+    return {
+      greenContainer,
+      hitZoneGfx,
+      hitZoneRing,
+      crosshair,
+      zoneCenter,
+      zoneRadiusPx,
+      zoneRadii,
+      endPos,
+      hitZone: zone,
+    };
+  }
+
+  async presentGolfswingBatSwing(event = {}, projectileAnimal, impactPos = {}, zoneCenter = {}) {
+    if (!projectileAnimal?.active) return;
+
+    const fast = this.fastForwardRequested;
+    const hit = event.hit === true;
+    const startX = projectileAnimal.x;
+    const startY = projectileAnimal.y;
+    const startScale = projectileAnimal.scaleX;
+    const impactX = Number(impactPos.x) || zoneCenter.x || startX;
+    const impactY = Number(impactPos.y) || zoneCenter.y || startY;
+    const point = new Phaser.Math.Vector2();
+    const travel = { t: 0 };
+    const startAngle = projectileAnimal.angle;
+
+    const destroyProjectile = () => {
+      if (projectileAnimal?.active) projectileAnimal.destroy();
+    };
+
+    if (!hit) {
+      const passPeakScale = SYMBOL_SCALE * (fast ? 4.8 : 8.5);
+      const passDuration = fast ? 680 : 1480;
+      const passX = Phaser.Math.Linear(impactX, GAME_LOGICAL_WIDTH * 0.5, 0.32);
+      const passY = GAME_LOGICAL_HEIGHT + 380;
+      projectileAnimal.setDepth(DEPTH.golfswingFx + 3);
+
+      const missCurve = new Phaser.Curves.CubicBezier(
+        new Phaser.Math.Vector2(startX, startY),
+        new Phaser.Math.Vector2(
+          (startX + impactX) * 0.38,
+          Math.min(startY, impactY) - 110
+        ),
+        new Phaser.Math.Vector2(
+          impactX + (passX - impactX) * 0.12,
+          impactY + Math.max(80, (passY - impactY) * 0.22)
+        ),
+        new Phaser.Math.Vector2(passX, passY)
+      );
+
+      await this.tweenPromise({
+        targets: travel,
+        t: 1,
+        duration: passDuration,
+        ease: "Quad.easeIn",
+        onUpdate: () => {
+          missCurve.getPoint(travel.t, point);
+          projectileAnimal.setPosition(point.x, point.y);
+          const crosshairT = 0.52;
+          const scaleT = travel.t <= crosshairT
+            ? (travel.t / crosshairT) ** 2 * 0.38
+            : 0.38 + ((travel.t - crosshairT) / (1 - crosshairT)) ** 2.6 * 0.62;
+          projectileAnimal.setScale(Phaser.Math.Linear(startScale, passPeakScale, scaleT));
+          projectileAnimal.setAngle(startAngle + 3.8 * 360 * travel.t);
+          projectileAnimal.setAlpha(Phaser.Math.Linear(0.75, 1, Math.min(1, travel.t * 1.5)));
+        },
+        onComplete: destroyProjectile,
+      });
+      destroyProjectile();
+      return;
+    }
+
+    const approachPeakScale = SYMBOL_SCALE * 2.75;
+    const approachDuration = fast ? 340 : 760;
+    const approachCurve = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(startX, startY),
+      new Phaser.Math.Vector2(
+        (startX + impactX) * 0.42,
+        Math.min(startY, impactY) - 120
+      ),
+      new Phaser.Math.Vector2(impactX, impactY)
+    );
+
+    await this.tweenPromise({
+      targets: travel,
+      t: 1,
+      duration: approachDuration,
+      ease: "Cubic.easeIn",
+      onUpdate: () => {
+        approachCurve.getPoint(travel.t, point);
+        projectileAnimal.setPosition(point.x, point.y);
+        const scaleT = travel.t * travel.t;
+        projectileAnimal.setScale(Phaser.Math.Linear(startScale, approachPeakScale, scaleT));
+        projectileAnimal.setAngle(startAngle + 4.2 * 360 * travel.t);
+        projectileAnimal.setAlpha(Phaser.Math.Linear(0.75, 1, Math.min(1, travel.t * 1.4)));
+      },
+    });
+    projectileAnimal.setPosition(impactX, impactY).setScale(approachPeakScale);
+  }
+
+  spawnGolfswingBloodSmear(fromX, fromY, toX, toY, {
+    depth = DEPTH.golfswingFx - 0.4,
+    lingerMs = 3600,
+    fadeHoldMs = 1200,
+    thicknessMin = 10,
+    thicknessMax = 24,
+  } = {}) {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1.5) return [];
+
+    const fast = this.fastForwardRequested;
+    const midX = (fromX + toX) / 2;
+    const midY = (fromY + toY) / 2;
+    const angle = Phaser.Math.RadToDeg(Math.atan2(dy, dx));
+    const thickness = Phaser.Math.Between(thicknessMin, thicknessMax);
+    const length = dist + Phaser.Math.Between(6, 18);
+    const tone = Phaser.Math.RND.pick([0x8b0000, 0x720000, 0x9a1010, 0x5c0000]);
+    const marks = [];
+
+    const smear = this.add.ellipse(
+      midX,
+      midY,
+      length,
+      thickness,
+      tone,
+      Phaser.Math.FloatBetween(0.78, 0.94)
+    ).setAngle(angle).setDepth(depth);
+    const core = this.add.ellipse(
+      midX,
+      midY,
+      length * 0.62,
+      thickness * 0.42,
+      0x3a0000,
+      Phaser.Math.FloatBetween(0.42, 0.62)
+    ).setAngle(angle).setDepth(depth - 0.01);
+    marks.push(smear, core);
+
+    if (Math.random() < 0.55) {
+      const blob = this.add.circle(
+        toX + Phaser.Math.Between(-6, 6),
+        toY + Phaser.Math.Between(-4, 4),
+        Phaser.Math.Between(6, 16),
+        Phaser.Math.RND.pick([0x8b0000, 0x6a0000]),
+        Phaser.Math.FloatBetween(0.65, 0.88)
+      ).setDepth(depth - 0.02);
+      marks.push(blob);
+    }
+
+    marks.forEach((mark) => {
+      this.golfswingObjects?.push(mark);
+      const holdAlpha = Phaser.Math.FloatBetween(0.18, 0.32);
+      const holdDuration = fast ? fadeHoldMs * 0.35 : fadeHoldMs + Phaser.Math.Between(-200, 350);
+      const fadeDuration = fast ? lingerMs * 0.4 : lingerMs + Phaser.Math.Between(-500, 700);
+      this.tweenPromise({
+        targets: mark,
+        alpha: holdAlpha,
+        duration: fadeDuration,
+        delay: fast ? 120 : holdDuration,
+        ease: "Sine.easeOut",
+      }).then(() => this.tweenPromise({
+        targets: mark,
+        alpha: 0,
+        duration: fadeDuration * 0.9,
+        ease: "Quad.easeIn",
+        onComplete: () => mark.destroy(),
+      }));
+    });
+
+    return marks;
+  }
+
+  spawnGolfswingBloodDrip(x, y, {
+    depth = DEPTH.golfswingFx - 0.45,
+    lingerMs = 4200,
+  } = {}) {
+    const fast = this.fastForwardRequested;
+    const drip = this.add.ellipse(
+      x,
+      y,
+      Phaser.Math.Between(3, 7),
+      Phaser.Math.Between(10, 22),
+      Phaser.Math.RND.pick([0x6f0000, 0x820000]),
+      Phaser.Math.FloatBetween(0.72, 0.9)
+    ).setDepth(depth);
+    this.golfswingObjects?.push(drip);
+
+    this.tweenPromise({
+      targets: drip,
+      y: y + Phaser.Math.Between(55, 150),
+      scaleY: Phaser.Math.FloatBetween(1.35, 2.4),
+      alpha: Phaser.Math.FloatBetween(0.28, 0.45),
+      duration: fast ? 700 : Phaser.Math.Between(1600, 3200),
+      ease: "Sine.easeIn",
+    }).then(() => this.tweenPromise({
+      targets: drip,
+      alpha: 0,
+      duration: fast ? lingerMs * 0.35 : lingerMs,
+      ease: "Quad.easeIn",
+      onComplete: () => drip.destroy(),
+    }));
+
+    return drip;
+  }
+
+  spawnGolfswingImpactBloodSmears(x, y) {
+    const fast = this.fastForwardRequested;
+    const streakCount = fast ? 8 : 16;
+    for (let i = 0; i < streakCount; i += 1) {
+      const angle = (Math.PI * 2 * i) / streakCount + Phaser.Math.FloatBetween(-0.25, 0.25);
+      const len = Phaser.Math.Between(42, fast ? 72 : 118);
+      this.spawnGolfswingBloodSmear(
+        x,
+        y,
+        x + Math.cos(angle) * len,
+        y + Math.sin(angle) * len,
+        {
+          thicknessMin: 8,
+          thicknessMax: fast ? 16 : 22,
+          lingerMs: fast ? 1400 : 4800,
+          fadeHoldMs: fast ? 400 : 1600,
+        }
+      );
+    }
+
+    const blobCount = fast ? 4 : 8;
+    for (let i = 0; i < blobCount; i += 1) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const radius = Phaser.Math.Between(8, 28);
+      const blobX = x + Math.cos(angle) * radius;
+      const blobY = y + Math.sin(angle) * radius;
+      const blob = this.add.circle(
+        blobX,
+        blobY,
+        Phaser.Math.Between(8, 20),
+        Phaser.Math.RND.pick([0x8b0000, 0x720000]),
+        Phaser.Math.FloatBetween(0.7, 0.92)
+      ).setDepth(DEPTH.golfswingFx - 0.38);
+      this.golfswingObjects?.push(blob);
+      this.tweenPromise({
+        targets: blob,
+        alpha: Phaser.Math.FloatBetween(0.2, 0.35),
+        duration: fast ? 900 : 3200,
+        delay: fast ? 80 : 900,
+        ease: "Sine.easeOut",
+      }).then(() => this.tweenPromise({
+        targets: blob,
+        alpha: 0,
+        duration: fast ? 700 : 2800,
+        ease: "Quad.easeIn",
+        onComplete: () => blob.destroy(),
+      }));
+    }
+  }
+
+  attachGolfswingBloodSmearTrail(target, {
+    depth = DEPTH.golfswingFx - 0.4,
+    intervalMs = 8,
+    lingerMs = 5200,
+    fadeHoldMs = 1400,
+  } = {}) {
+    if (!target) return () => {};
+
+    const fast = this.fastForwardRequested;
+    let lastX = target.x;
+    let lastY = target.y;
+    let dripCounter = 0;
+
+    const timer = this.time.addEvent({
+      delay: fast ? 14 : intervalMs,
+      loop: true,
+      callback: () => {
+        if (!target.active || target.alpha <= 0.05) return;
+
+        this.spawnGolfswingBloodSmear(lastX, lastY, target.x, target.y, {
+          depth,
+          lingerMs: fast ? lingerMs * 0.35 : lingerMs,
+          fadeHoldMs: fast ? fadeHoldMs * 0.35 : fadeHoldMs,
+          thicknessMin: fast ? 8 : 12,
+          thicknessMax: fast ? 16 : 28,
+        });
+
+        dripCounter += 1;
+        if (dripCounter % (fast ? 5 : 3) === 0 && Math.random() < 0.72) {
+          this.spawnGolfswingBloodDrip(
+            target.x + Phaser.Math.Between(-10, 10),
+            target.y + Phaser.Math.Between(-4, 8),
+            { depth: depth - 0.05, lingerMs: fast ? lingerMs * 0.4 : lingerMs + 800 }
+          );
+        }
+
+        lastX = target.x;
+        lastY = target.y;
+      },
+    });
+
+    return () => timer.remove(false);
+  }
+
+  async presentGolfswingAnimalSplatterImpact(
+    projectileAnimal,
+    impactX,
+    impactY,
+    { isSuperGolfswing = false } = {}
+  ) {
+    if (!projectileAnimal?.active) return;
+
+    const fast = this.fastForwardRequested;
+    this.cameras.main.shake(fast ? 120 : 260, 0.012);
+
+    if (isSuperGolfswing) {
+      this.createUnicornRainbowCloud(impactX, impactY);
+      await this.vanishUnicornIntoCloud(projectileAnimal, impactX, impactY);
+      return;
+    }
+
+    this.playAnimalCrushSfx();
+    this.spawnBloodBurst(impactX, impactY, GAME_LOGICAL_HEIGHT, fast ? 12 : 26);
+    this.spawnGibs(impactX, impactY, GAME_LOGICAL_HEIGHT, fast ? 6 : 12);
+    this.spawnGolfswingImpactBloodSmears(impactX, impactY);
+
+    await this.tweenPromise({
+      targets: projectileAnimal,
+      scaleX: projectileAnimal.scaleX * 1.18,
+      scaleY: projectileAnimal.scaleY * 0.72,
+      duration: fast ? 70 : 120,
+      ease: "Quad.easeOut",
+    });
+  }
+
+  startGolfswingAnimalSlide(projectileAnimal, impactX, impactY, zoneCenter = {}, { isSuperGolfswing = false } = {}) {
+    if (isSuperGolfswing || !projectileAnimal?.active) {
+      return {
+        promise: Promise.resolve(),
+        stopTrail: () => {},
+        fadeOut: () => Promise.resolve(),
+        tuckBelowWheel: () => {},
+      };
+    }
+
+    const fast = this.fastForwardRequested;
+    const centerX = Number(zoneCenter.x) || GAME_LOGICAL_WIDTH * 0.5;
+    const driftX = impactX >= centerX ? 150 : -150;
+    const slideTargetX = impactX + driftX;
+    const slideTargetY = GAME_LOGICAL_HEIGHT + 140;
+    let settled = false;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      stopTrail();
+      projectileAnimal?.destroy?.();
+    };
+
+    const stopTrail = this.attachGolfswingBloodSmearTrail(projectileAnimal, {
+      depth: DEPTH.golfswingFx - 0.35,
+      intervalMs: 6,
+      lingerMs: fast ? 1800 : 6200,
+      fadeHoldMs: fast ? 500 : 1800,
+    });
+
+    const slidePromise = this.tweenPromise({
+      targets: projectileAnimal,
+      x: slideTargetX,
+      y: slideTargetY,
+      angle: projectileAnimal.angle + Phaser.Math.Between(35, 70),
+      duration: fast ? 1100 : 7200,
+      ease: "Sine.easeIn",
+    }).finally(settle);
+
+    return {
+      promise: slidePromise,
+      stopTrail,
+      tuckBelowWheel: () => {
+        projectileAnimal?.setDepth?.(DEPTH.golfswingFx - 0.55);
+      },
+      fadeOut: (fadeMs = fast ? 260 : 520) => {
+        if (!projectileAnimal?.active || settled) return Promise.resolve();
+        return this.tweenPromise({
+          targets: projectileAnimal,
+          alpha: 0,
+          duration: fadeMs,
+          ease: "Quad.easeIn",
+          onComplete: settle,
+        });
+      },
+    };
+  }
+
+  async presentGolfswingWheel(
+    event = {},
+    hitZoneGfx,
+    zoneCenter,
+    zoneRadiusPx,
+    hitZoneRing = null,
+    crosshair = null,
+    { animalSlide = null, greenContainer = null } = {}
+  ) {
+    crosshair?.destroy?.();
+    animalSlide?.tuckBelowWheel?.();
+
+    const sortedSegments = Array.isArray(event.jackpotSegments) && event.jackpotSegments.length
+      ? [...event.jackpotSegments].map(Number).filter(Number.isFinite).sort((a, b) => a - b)
+      : [5, 10, 15, 30, 50, 100, 200, 500];
+    const segments = Array.isArray(event.jackpotWheelSegments) && event.jackpotWheelSegments.length
+      ? event.jackpotWheelSegments.map(Number).filter(Number.isFinite)
+      : sortedSegments;
+    const winSegment = Number(event.jackpotSegment) || segments[0];
+    const winIndex = Math.max(0, segments.indexOf(winSegment));
+
+    const wheelRadius = zoneRadiusPx;
+    const wheel = this.add.container(zoneCenter.x, zoneCenter.y)
+      .setDepth(DEPTH.golfswingFx)
+      .setScale(0.02)
+      .setAlpha(0);
+    const sliceCount = segments.length;
+    const sliceAngle = (Math.PI * 2) / sliceCount;
+
+    segments.forEach((label, index) => {
+      const startAngle = index * sliceAngle - Math.PI / 2;
+      const endAngle = startAngle + sliceAngle;
+      const arc = this.add.graphics();
+      const segmentColor = event.isSuperGolfswing
+        ? getSuperGolfswingSegmentColor(index)
+        : getGolfswingSegmentColor(label, sortedSegments);
+      arc.fillStyle(segmentColor, 0.92);
+      arc.beginPath();
+      arc.moveTo(0, 0);
+      arc.arc(0, 0, wheelRadius, startAngle, endAngle, false);
+      arc.closePath();
+      arc.fillPath();
+      const labelAngle = startAngle + sliceAngle / 2;
+      const fontSize = Math.max(14, Math.round(wheelRadius * 0.075));
+      const text = this.add.text(
+        Math.cos(labelAngle) * wheelRadius * 0.62,
+        Math.sin(labelAngle) * wheelRadius * 0.62,
+        `${label}x`,
+        {
+          fontFamily: "Arial Black, Arial",
+          fontSize: `${fontSize}px`,
+          color: "#ffffff",
+          stroke: "#111111",
+          strokeThickness: 3,
+        }
+      ).setOrigin(0.5);
+      wheel.add([arc, text]);
+    });
+    this.golfswingObjects.push(wheel);
+
+    const fast = this.fastForwardRequested;
+    const morphDuration = fast ? 220 : 520;
+
+    const greenFadeTarget = greenContainer?.active ? greenContainer : null;
+    if (greenFadeTarget?.active) {
+      await Promise.all([
+        this.tweenPromise({
+          targets: greenFadeTarget,
+          alpha: 0,
+          scaleX: 1.06,
+          scaleY: 1.06,
+          duration: morphDuration,
+          ease: "Quad.easeIn",
+        }),
+        this.tweenPromise({
+          targets: wheel,
+          scaleX: 1,
+          scaleY: 1,
+          alpha: 1,
+          duration: morphDuration,
+          ease: "Back.easeOut",
+          easeParams: [1.08],
+        }),
+      ]);
+      greenFadeTarget.destroy();
+    } else if (hitZoneGfx?.active) {
+      await Promise.all([
+        this.tweenPromise({
+          targets: hitZoneGfx,
+          alpha: 0,
+          scaleX: 1.06,
+          scaleY: 1.06,
+          duration: morphDuration,
+          ease: "Quad.easeIn",
+        }),
+        this.tweenPromise({
+          targets: hitZoneRing,
+          alpha: 0,
+          duration: morphDuration,
+          ease: "Quad.easeIn",
+        }),
+        this.tweenPromise({
+          targets: wheel,
+          scaleX: 1,
+          scaleY: 1,
+          alpha: 1,
+          duration: morphDuration,
+          ease: "Back.easeOut",
+          easeParams: [1.08],
+        }),
+      ]);
+      hitZoneGfx.destroy();
+      hitZoneRing?.destroy();
+    } else {
+      wheel.setScale(1).setAlpha(1);
+    }
+
+    const pointer = this.add.triangle(
+      zoneCenter.x,
+      zoneCenter.y - wheelRadius - 8,
+      0, 22, -14, 0, 14, 0,
+      0xffd700
+    )
+      .setDepth(DEPTH.golfswingFx + 2)
+      .setStrokeStyle(2, 0x8a6d00, 0.95)
+      .setAlpha(0);
+    const pointerPin = this.add.circle(zoneCenter.x, zoneCenter.y - wheelRadius - 8, 5, 0xffd700, 1)
+      .setDepth(DEPTH.golfswingFx + 2)
+      .setStrokeStyle(2, 0x8a6d00, 0.95)
+      .setAlpha(0);
+    this.golfswingObjects.push(pointer, pointerPin);
+
+    await Promise.all([
+      this.tweenPromise({ targets: pointer, alpha: 1, duration: fast ? 120 : 240, ease: "Quad.easeOut" }),
+      this.tweenPromise({ targets: pointerPin, alpha: 1, duration: fast ? 120 : 240, ease: "Quad.easeOut" }),
+    ]);
+
+    const targetRotation = -(winIndex * sliceAngle + sliceAngle / 2);
+    const fullTurns = 4 + Math.floor(Math.random() * 2);
+    const finalRotation = targetRotation + fullTurns * Math.PI * 2;
+
+    if (!fast) {
+      await this.waitForPresentation(320, { skippable: true });
+    }
+
+    const spinDuration = fast ? 900 : 5600;
+    const fadeLeadMs = fast ? 220 : 780;
+    const fadeTimer = this.time.delayedCall(
+      Math.max(0, spinDuration - fadeLeadMs),
+      () => animalSlide?.fadeOut?.(fast ? 260 : 520)
+    );
+
+    await this.tweenPromise({
+      targets: wheel,
+      rotation: finalRotation,
+      duration: spinDuration,
+      ease: fast ? "Cubic.easeOut" : "Quart.easeOut",
+    });
+    fadeTimer.remove(false);
+
+    if (!fast) {
+      await this.tweenPromise({
+        targets: wheel,
+        scaleX: 1.04,
+        scaleY: 1.04,
+        duration: 180,
+        ease: "Sine.easeOut",
+        yoyo: true,
+      });
+      await this.waitForPresentation(820, { skippable: true });
+    } else {
+      await this.waitForPresentation(200, { skippable: true });
+    }
+  }
+
+  async presentGolfswingFeature(event = {}) {
+    this.clearPartyPresentation({ immediate: true });
+    if (!event?.triggered || !event.pickedCell) return;
+
+    this.golfswingObjects = [];
+    try {
+      await this.presentGolfswingGrab(event);
+      const sceneResult = await this.presentGolfswingSceneTransition(event);
+      let batSwingPromise = Promise.resolve();
+      const aimResult = await this.presentGolfswingAim(event, {
+        shotTriggerT: this.fastForwardRequested ? 0.9 : 0.86,
+        onShotTrigger: (partialResult) => {
+          batSwingPromise = this.presentGolfswingBatSwing(
+            event,
+            sceneResult?.projectileAnimal,
+            partialResult.endPos,
+            partialResult.zoneCenter
+          );
+        },
+      });
+
+      await batSwingPromise;
+
+      if (event.hit) {
+        const isSuperGolfswing = event.isSuperGolfswing === true;
+        await this.presentGolfswingAnimalSplatterImpact(
+          sceneResult?.projectileAnimal,
+          aimResult.endPos.x,
+          aimResult.endPos.y,
+          { isSuperGolfswing }
+        );
+        const animalSlide = this.startGolfswingAnimalSlide(
+          sceneResult?.projectileAnimal,
+          aimResult.endPos.x,
+          aimResult.endPos.y,
+          aimResult.zoneCenter,
+          { isSuperGolfswing }
+        );
+        await this.presentGolfswingWheel(
+          event,
+          aimResult.hitZoneGfx,
+          aimResult.zoneCenter,
+          aimResult.zoneRadiusPx,
+          aimResult.hitZoneRing,
+          aimResult.crosshair,
+          { animalSlide, greenContainer: aimResult.greenContainer }
+        );
+        await animalSlide.promise;
+      } else {
+        aimResult.crosshair?.destroy?.();
+        const missText = this.add.text(
+          aimResult.zoneCenter.x,
+          aimResult.zoneCenter.y,
+          "MISS",
+          {
+            fontFamily: "Arial Black, Arial",
+            fontSize: "42px",
+            color: "#ff6b6b",
+            stroke: "#1a0808",
+            strokeThickness: 6,
+          }
+        ).setOrigin(0.5).setDepth(DEPTH.golfswingFx + 3);
+        this.golfswingObjects.push(missText);
+        await this.waitForPresentation(this.fastForwardRequested ? 300 : 900, { skippable: true });
+      }
+
+      await this.restoreGolfswingBoardPresentation();
+    } catch (error) {
+      console.error("Golf swing presentation failed:", error);
+    } finally {
+      await this.dismissUnicornRainbowCloud();
+      this.clearGolfswingPresentation();
+    }
   }
 
   syncLifeSegmentSlotVisibility() {
@@ -7089,6 +8117,7 @@ export class GameScene extends Phaser.Scene {
     this.syncCountUpDisplay(0);
     this.clearStompLandedCoins();
     this.clearPartyPresentation({ immediate: true });
+    this.clearGolfswingPresentation();
     this.clearPendingFastForward();
   }
 

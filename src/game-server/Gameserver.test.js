@@ -168,6 +168,143 @@ test("feature buy super bonus hunts normal rng until unicorn superbonus is found
   assert.equal(transition?.bonusState?.maxLives, 4);
 });
 
+test("feature buy golf swing guarantees golfswing on paid spin", async () => {
+  const server = new GameServer({ random: Math.random });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "golfswingEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin?.golfswingEvent?.triggered);
+  assert.equal(spin.roundMeta?.ticket, "golfswingEntry");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.equal(spin.bucket, "golfswingEntry");
+});
+
+test("feature buy super golf swing guarantees unicorn super golfswing", async () => {
+  const server = new GameServer({ random: Math.random });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "superGolfswingEntry" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin?.golfswingEvent?.triggered);
+  assert.equal(spin.golfswingEvent.isSuperGolfswing, true);
+  assert.equal(spin.golfswingEvent.pickedCell?.isUnicorn, true);
+  assert.equal(spin.roundMeta?.ticket, "superGolfswingEntry");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.ok(spin.golfswingEvent.jackpotSegments.includes(10));
+  assert.ok(!spin.golfswingEvent.jackpotSegments.includes(1));
+});
+
+test("super golf swing entry boards vary between generations", () => {
+  const server = new GameServer({ random: Math.random });
+  const boards = Array.from({ length: 12 }, () => server.buildGolfswingEntryBoard({ requireUnicorn: true }));
+  const signatures = new Set(boards.map((board) => JSON.stringify(board)));
+
+  assert.ok(signatures.size > 1, "expected randomized super golf boards");
+  boards.forEach((board) => {
+    assert.ok(server.findUnicornPositions(board).length >= 1);
+    assert.ok(server.findAnimalPositions(board).length >= 1);
+  });
+});
+
+test("super golf swing picks super jackpot segments when unicorn is chosen", () => {
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const board = [
+    [1, 2, 3],
+    [4, unicorn, 6],
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 2, 3],
+  ];
+  const server = new GameServer({
+    random: () => 0,
+  });
+
+  const result = server.resolveGolfswingFeature(board, {
+    forceGolfswing: true,
+    forceSuperGolfswing: true,
+    betSize: 1,
+  });
+
+  assert.ok(result?.golfswingEvent?.triggered);
+  assert.equal(result.golfswingEvent.isSuperGolfswing, true);
+  assert.equal(result.golfswingEvent.pickedCell.symbol, unicorn);
+  assert.ok(result.golfswingEvent.jackpotSegments.includes(5120));
+});
+
+test("symbol win injection can add ways wins on normal noWin ticket draws", () => {
+  const server = new GameServer({ random: () => 0 });
+  const board = server.maybeInjectSymbolWin(server.buildNoWinBoard(), {
+    ticket: "noWin",
+    ticketStrategy: "normal",
+  });
+
+  const result = server.evaluateWays(board, 1);
+  assert.ok(result.waysWins.length >= 1);
+  assert.ok(result.waysWins.some((win) => win.reelCount === 3));
+  assert.ok(result.waysWins.some((win) => win.symbol >= 6));
+});
+
+test("symbol win injection uses lowsWeight vs highsWeight tier pick", () => {
+  const lowServer = new GameServer({ random: () => 0 });
+  assert.ok(lowServer.pickInjectedSymbol() >= 6);
+
+  const highServer = new GameServer({ random: () => 0.99 });
+  assert.ok(highServer.pickInjectedSymbol() <= 5);
+});
+
+test("symbol win injection is disabled for dev noWin strategy", async () => {
+  const server = new GameServer({
+    random: () => 0,
+  });
+
+  const states = await server.generateRoundStates({ ticketStrategy: "noWin" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.equal(states.at(-1).tbm, 0);
+  assert.equal(spin?.waysWins?.length || 0, 0);
+});
+
+test("golfswing crosshair end stays inside hit zone on hit and outside on miss", () => {
+  const hitZone = { x: 0.5, y: 0.45, radius: 0.34 };
+
+  for (let index = 0; index < 200; index += 1) {
+    const server = new GameServer({ random: Math.random });
+    const hitEnd = server.resolveGolfCrosshairEnd(true, hitZone);
+    const missEnd = server.resolveGolfCrosshairEnd(false, hitZone);
+
+    assert.ok(
+      server.isInsideGolfHitZone(hitEnd.crosshairEndX, hitEnd.crosshairEndY, hitZone),
+      "hit crosshair must land inside hit zone"
+    );
+    assert.ok(
+      !server.isInsideGolfHitZone(missEnd.crosshairEndX, missEnd.crosshairEndY, hitZone),
+      "miss crosshair must land outside hit zone"
+    );
+  }
+});
+
+test("golf jackpot wheel interleaves rare segments next to common ones", () => {
+  const server = new GameServer({ random: Math.random });
+  const sorted = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
+  const wheel = server.buildGolfJackpotWheelSegments(sorted);
+
+  assert.equal(wheel.length, sorted.length);
+  assert.deepEqual([...wheel].sort((a, b) => a - b), sorted);
+
+  const rare = new Set([32, 64, 128, 256, 512]);
+  const common = new Set([1, 2, 4, 8, 16]);
+  let adjacentPairCount = 0;
+  wheel.forEach((value, index) => {
+    const prev = wheel[(index + wheel.length - 1) % wheel.length];
+    const next = wheel[(index + 1) % wheel.length];
+    if (!rare.has(value)) return;
+    if (common.has(prev) || common.has(next)) adjacentPairCount += 1;
+  });
+
+  assert.ok(adjacentPairCount >= 3, "rare segments should sit beside common wins on the wheel");
+});
+
 test("unicorn wild substitutes in left-to-right ways wins", () => {
   const server = new GameServer({ random: () => 0 });
   const unicorn = Number(serverConfig.unicornSymbol ?? 14);

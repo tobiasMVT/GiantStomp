@@ -87,6 +87,7 @@ export class GameServer {
     stompEvent = null,
     crushEvent = null,
     ouchEvent = null,
+    golfswingEvent = null,
   } = {}) {
     const delta = Math.max(0, Number(amount) || 0);
     if (delta <= 0) {
@@ -126,6 +127,9 @@ export class GameServer {
           ouchEvent.finalWinTbm = lastStep.winTbm;
           ouchEvent.finalMultiplier = lastStep.multiplier;
         }
+      }
+      if (golfswingEvent?.hit) {
+        golfswingEvent.jackpotWin = asMoney(Number(golfswingEvent.jackpotWin || 0) * scale);
       }
     }
 
@@ -445,6 +449,44 @@ export class GameServer {
     );
   }
 
+  maybeInjectSymbolWin(board, { ticket, ticketStrategy, fakeNoWins = false } = {}) {
+    if (ticket !== "noWin" || ticketStrategy !== "normal" || fakeNoWins) return board;
+
+    const odds = Number(serverConfig.symHitRateAdjustments?.winInjection ?? 0);
+    if (odds <= 0 || this.random() >= odds) return board;
+
+    const nextBoard = clone(board);
+    const symbol = this.pickInjectedSymbol();
+    const reel1Row = Math.floor(this.random() * this.height);
+    nextBoard[0][reel1Row] = symbol;
+
+    for (const reel of [1, 2]) {
+      const alreadyThere = nextBoard[reel].some((cell) => Number(cell) === symbol);
+      if (!alreadyThere) {
+        const row = Math.floor(this.random() * this.height);
+        nextBoard[reel][row] = symbol;
+      }
+    }
+
+    return nextBoard;
+  }
+
+  pickInjectedSymbol() {
+    const cfg = serverConfig.symHitRateAdjustments || {};
+    const lows = (Array.isArray(cfg.Lows) ? cfg.Lows : cfg.lows || [6, 7, 8, 9, 10]).map(Number);
+    const highs = (Array.isArray(cfg.Highs) ? cfg.Highs : cfg.highs || [1, 2, 3, 4, 5]).map(Number);
+    const lowsWeight = Number(cfg.lowsWeight ?? 1);
+    const highsWeight = Number(cfg.highsWeight ?? 0);
+
+    const tier = this.drawWeightedKey(
+      { low: lowsWeight, high: highsWeight },
+      lows.length ? "low" : "high"
+    );
+    const pool = tier === "high" ? highs : lows;
+    if (!pool.length) return highs[0] || lows[0] || 1;
+    return pool[Math.floor(this.random() * pool.length)];
+  }
+
   validateBoard(board) {
     const validSymbols = new Set([
       ...Object.keys(serverConfig.symbolWeights || {}),
@@ -469,19 +511,23 @@ export class GameServer {
   createInitialBoard({
     action,
     ticket,
+    ticketStrategy,
     spinIndex,
     isBonus,
     forceSymbolLanding = false,
     trapPower = 0,
     trapProgress = {},
     hammersCollected = 0,
+    fakeNoWins = false,
   }) {
     if (this.boardProvider) {
       const supplied = this.boardProvider({ action, ticket, spinIndex, isBonus });
       if (supplied) return this.validateBoard(clone(supplied));
     }
 
-    if (ticket === "noWin") return this.buildNoWinBoard();
+    if (ticket === "noWin") {
+      return this.maybeInjectSymbolWin(this.buildNoWinBoard(), { ticket, ticketStrategy, fakeNoWins });
+    }
     if (ticket === "waysWin") {
       const board = this.buildNoWinBoard();
       board[0][0] = 1;
@@ -512,6 +558,12 @@ export class GameServer {
       board[4][1] = 2;
       board[4][2] = 3;
       return board;
+    }
+    if (ticket === "golfswingEntry") {
+      return this.buildGolfswingEntryBoard({ requireUnicorn: false });
+    }
+    if (ticket === "superGolfswingEntry") {
+      return this.buildGolfswingEntryBoard({ requireUnicorn: true });
     }
     if (ticket === "superBonusEntry") {
       const board = this.buildNoWinBoard();
@@ -1021,6 +1073,52 @@ export class GameServer {
     return serverConfig.crushFeature || { odds: 0.05 };
   }
 
+  getGolfswingConfig() {
+    return serverConfig.golfswingFeature || { odds: 0.03, hitWeight: 1, missWeight: 1 };
+  }
+
+  getGolfSwingJackpotWeights() {
+    return serverConfig.golfSwingJackpotSegmentsAndWeight || { "5": 1 };
+  }
+
+  getGolfSwingSuperJackpotWeights() {
+    return serverConfig.golfSwingSuperJackpotSegmentsAndWeight || { "10": 1 };
+  }
+
+  shuffleGolfJackpotWheel(values = []) {
+    const list = [...values];
+    for (let index = list.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(this.random() * (index + 1));
+      [list[index], list[swapIndex]] = [list[swapIndex], list[index]];
+    }
+    return list;
+  }
+
+  buildGolfJackpotWheelSegments(segments = []) {
+    const sorted = [...segments].filter(Number.isFinite).sort((a, b) => a - b);
+    if (sorted.length <= 2) return this.shuffleGolfJackpotWheel(sorted);
+
+    const splitAt = Math.ceil(sorted.length / 2);
+    const common = this.shuffleGolfJackpotWheel(sorted.slice(0, splitAt));
+    const rare = this.shuffleGolfJackpotWheel(sorted.slice(splitAt));
+    const wheel = [];
+
+    for (let index = 0; index < Math.max(common.length, rare.length); index += 1) {
+      if (index < common.length) wheel.push(common[index]);
+      if (index < rare.length) wheel.push(rare[index]);
+    }
+
+    const offset = Math.floor(this.random() * wheel.length);
+    const rotated = wheel.slice(offset).concat(wheel.slice(0, offset));
+    const swapPasses = Math.min(3, Math.max(1, Math.floor(rotated.length / 4)));
+    for (let pass = 0; pass < swapPasses; pass += 1) {
+      const swapIndex = Math.floor(this.random() * (rotated.length - 1));
+      [rotated[swapIndex], rotated[swapIndex + 1]] = [rotated[swapIndex + 1], rotated[swapIndex]];
+    }
+
+    return rotated;
+  }
+
   getPartyConfig() {
     return serverConfig.partyFeature || {
       odds: 0.03,
@@ -1129,6 +1227,30 @@ export class GameServer {
       reel: Math.floor(this.random() * this.width),
       row: Math.floor(this.random() * this.height),
     };
+  }
+
+  buildGolfswingEntryBoard({ requireUnicorn = false } = {}) {
+    const board = this.generateRandomBoard(serverConfig.symbolWeights);
+    const unicornSymbol = this.getUnicornSymbol();
+    const animalSymbols = [...this.getAnimalSymbolSet()];
+
+    if (requireUnicorn) {
+      const { reel, row } = this.pickRandomUnicornCell();
+      board[reel][row] = unicornSymbol;
+    }
+
+    const minAnimals = 1;
+    let guard = 0;
+    while (this.findAnimalPositions(board).length < minAnimals && guard < 50) {
+      guard += 1;
+      const reel = Math.floor(this.random() * this.width);
+      const row = Math.floor(this.random() * this.height);
+      if (Number(board[reel][row]) === unicornSymbol) continue;
+      const symbol = animalSymbols[Math.floor(this.random() * animalSymbols.length)] || 1;
+      board[reel][row] = symbol;
+    }
+
+    return board;
   }
 
   maybeInjectUnicorn(board, { ticket } = {}) {
@@ -1354,6 +1476,132 @@ export class GameServer {
     };
   }
 
+  getGolfHitZoneDistance(nx, ny, hitZone) {
+    const dx = Number(nx) - Number(hitZone.x);
+    const dy = Number(ny) - Number(hitZone.y);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  isInsideGolfHitZone(nx, ny, hitZone) {
+    return this.getGolfHitZoneDistance(nx, ny, hitZone) <= Number(hitZone.radius);
+  }
+
+  resolveGolfCrosshairEnd(hit, hitZone) {
+    const bounds = { minX: 0.08, maxX: 0.92, minY: 0.2, maxY: 0.7 };
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const minMissDist = Number(hitZone.radius) * 1.08;
+    const maxHitDist = Number(hitZone.radius) * 0.98;
+
+    if (hit) {
+      const angle = this.random() * Math.PI * 2;
+      const dist = maxHitDist * (0.12 + this.random() * 0.88);
+      let endX = hitZone.x + Math.cos(angle) * dist;
+      let endY = hitZone.y + Math.sin(angle) * dist;
+      endX = clamp(endX, bounds.minX, bounds.maxX);
+      endY = clamp(endY, bounds.minY, bounds.maxY);
+      if (!this.isInsideGolfHitZone(endX, endY, hitZone)) {
+        endX = hitZone.x + Math.cos(angle) * dist * 0.75;
+        endY = hitZone.y + Math.sin(angle) * dist * 0.75;
+      }
+      return { crosshairEndX: endX, crosshairEndY: endY };
+    }
+
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const angle = this.random() * Math.PI * 2;
+      const dist = minMissDist + this.random() * Number(hitZone.radius) * 0.55;
+      let endX = clamp(hitZone.x + Math.cos(angle) * dist, bounds.minX, bounds.maxX);
+      let endY = clamp(hitZone.y + Math.sin(angle) * dist, bounds.minY, bounds.maxY);
+      if (!this.isInsideGolfHitZone(endX, endY, hitZone)
+        && this.getGolfHitZoneDistance(endX, endY, hitZone) >= minMissDist) {
+        return { crosshairEndX: endX, crosshairEndY: endY };
+      }
+    }
+
+    const fallbackAngle = this.random() * Math.PI * 2;
+    return {
+      crosshairEndX: clamp(hitZone.x + Math.cos(fallbackAngle) * minMissDist, bounds.minX, bounds.maxX),
+      crosshairEndY: clamp(hitZone.y + Math.sin(fallbackAngle) * minMissDist, bounds.minY, bounds.maxY),
+    };
+  }
+
+  resolveGolfswingFeature(board, {
+    forceGolfswing = false,
+    forceSuperGolfswing = false,
+    allowNatural = false,
+    betSize = 1,
+  } = {}) {
+    if (!forceGolfswing && !allowNatural) return null;
+    const cfg = this.getGolfswingConfig();
+    const triggered = forceGolfswing || this.random() < Number(cfg.odds || 0);
+    if (!triggered) return null;
+
+    const animals = this.findAnimalPositions(board);
+    const unicorns = this.findUnicornPositions(board);
+    let picked;
+    let isSuperGolfswing = false;
+
+    if (forceSuperGolfswing) {
+      if (!unicorns.length) return null;
+      picked = unicorns[Math.floor(this.random() * unicorns.length)];
+      isSuperGolfswing = true;
+    } else {
+      const pickPool = [...animals, ...unicorns];
+      if (!pickPool.length) return null;
+      picked = pickPool[Math.floor(this.random() * pickPool.length)];
+      isSuperGolfswing = picked.isUnicorn === true;
+    }
+
+    const hit = this.drawWeightedKey({
+      hit: Number(cfg.hitWeight ?? 1),
+      miss: Number(cfg.missWeight ?? 1),
+    }, "hit") === "hit";
+
+    const jackpotWeights = isSuperGolfswing
+      ? this.getGolfSwingSuperJackpotWeights()
+      : this.getGolfSwingJackpotWeights();
+    const defaultJackpotKey = isSuperGolfswing ? "10" : "5";
+    const jackpotSegment = hit
+      ? Number(this.drawWeightedKey(jackpotWeights, defaultJackpotKey))
+      : 0;
+    const jackpotWin = hit ? asMoney(jackpotSegment * Number(betSize)) : 0;
+
+    const aimDurationMs = 3000 + Math.floor(this.random() * 2001);
+    const hitZoneX = 0.5;
+    const hitZoneY = 0.45;
+    const hitZoneRadius = 0.34;
+
+    const hitZone = { x: hitZoneX, y: hitZoneY, radius: hitZoneRadius };
+    const { crosshairEndX, crosshairEndY } = this.resolveGolfCrosshairEnd(hit, hitZone);
+
+    const jackpotSegments = Object.keys(jackpotWeights)
+      .map(Number)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+    const jackpotWheelSegments = this.buildGolfJackpotWheelSegments(jackpotSegments);
+
+    return {
+      golfswingEvent: {
+        triggered: true,
+        isSuperGolfswing,
+        pickedCell: { ...picked },
+        reelsBeforeGolfswing: clone(board),
+        hit,
+        aimDurationMs,
+        hitZone,
+        crosshairY: hitZoneY,
+        crosshairEndX,
+        crosshairEndY,
+        crosshairInsideHitZone: this.isInsideGolfHitZone(crosshairEndX, crosshairEndY, hitZone),
+        jackpotSegment,
+        jackpotWin,
+        jackpotSegments,
+        jackpotWheelSegments,
+        teaseMs: 700,
+        pauseMs: 350,
+      },
+    };
+  }
+
   getAngerMeterMax() {
     return Math.max(1, Number(serverConfig.anger?.maximum) || 10);
   }
@@ -1467,6 +1715,7 @@ export class GameServer {
     stompEvent = null,
     crushEvent = null,
     partyEvent = null,
+    golfswingEvent = null,
     animalKillEvents = [],
     superBonusTriggered = false,
     unicornCrushEvent = null,
@@ -1518,6 +1767,7 @@ export class GameServer {
       stompEvent: stompEvent ? clone(stompEvent) : null,
       crushEvent: crushEvent ? clone(crushEvent) : null,
       partyEvent: partyEvent ? clone(partyEvent) : null,
+      golfswingEvent: golfswingEvent ? clone(golfswingEvent) : null,
       winCapReached,
       roundMeta: clone(roundMeta)
     };
@@ -1542,12 +1792,17 @@ export class GameServer {
     allowNaturalCrush = false,
     forceParty = false,
     allowNaturalParty = false,
+    forceGolfswing = false,
+    forceSuperGolfswing = false,
+    allowNaturalGolfswing = false,
     forceBonus = false,
   }) {
     let board = clone(initialBoard);
+    const landingBoard = clone(initialBoard);
     let stompEvent = null;
     let crushEvent = null;
     let partyEvent = null;
+    let golfswingEvent = null;
     let animalKillEvents = [];
     let bonusTriggeredThisAction = false;
     let superBonusTriggered = false;
@@ -1664,6 +1919,29 @@ export class GameServer {
     const scatterCandidates = this.collectScatterCandidates(board, null, tracker.consumedScatterKeys);
     const scatterLandings = this.consumeScatterLandings(scatterCandidates);
 
+    if (initialAction === "spin" && !isBonus
+      && !stompEvent && !crushEvent && !partyEvent?.giantAppeared) {
+      const swingResult = this.resolveGolfswingFeature(landingBoard, {
+        forceGolfswing,
+        forceSuperGolfswing,
+        allowNatural: allowNaturalGolfswing,
+        betSize,
+      });
+      if (swingResult?.golfswingEvent) {
+        golfswingEvent = swingResult.golfswingEvent;
+        if (golfswingEvent.hit && Number(golfswingEvent.jackpotWin) > 0) {
+          const capResult = this.applyWinCapAddition(
+            totals,
+            Number(golfswingEvent.jackpotWin),
+            { golfswingEvent }
+          );
+          golfswingEvent.jackpotWin = capResult.applied;
+          golfswingEvent.winCapReached = capResult.capped || this.isWinCapReached(totals);
+          totals.tbm = asTbm(totals.tbm + Number(golfswingEvent.jackpotSegment || 0));
+        }
+      }
+    }
+
     if (this.isWinCapReached(totals)) {
       bonusTriggeredThisAction = false;
       superBonusTriggered = false;
@@ -1704,6 +1982,7 @@ export class GameServer {
       stompEvent,
       crushEvent,
       partyEvent,
+      golfswingEvent,
       animalKillEvents,
       superBonusTriggered,
       unicornCrushEvent,
@@ -1726,6 +2005,9 @@ export class GameServer {
     const allowNaturalCrush = ticket === "random";
     const forceParty = ticket === "partyEntry";
     const allowNaturalParty = ticket === "random";
+    const forceGolfswing = ticket === "golfswingEntry" || ticket === "superGolfswingEntry";
+    const forceSuperGolfswing = ticket === "superGolfswingEntry";
+    const allowNaturalGolfswing = ticket === "random";
     const tracker = this.createRoundTracker();
     const totals = { twa: 0, tbm: 0 };
     const roundStates = [];
@@ -1733,8 +2015,10 @@ export class GameServer {
     const paidBoard = this.createInitialBoard({
       action: "spin",
       ticket,
+      ticketStrategy: strategy,
       spinIndex: 0,
-      isBonus: false
+      isBonus: false,
+      fakeNoWins,
     });
     const paidNext = this.appendCascadeChain({
       roundStates,
@@ -1755,6 +2039,9 @@ export class GameServer {
       allowNaturalCrush,
       forceParty,
       allowNaturalParty,
+      forceGolfswing,
+      forceSuperGolfswing,
+      allowNaturalGolfswing,
       forceBonus: ticket === "bonusEntry",
     });
 
@@ -1860,6 +2147,16 @@ export class GameServer {
     return roundStates.some((state) => state.crushEvent?.triggered);
   }
 
+  hasGolfswing(roundStates) {
+    return roundStates.some((state) => state.golfswingEvent?.triggered);
+  }
+
+  hasSuperGolfswing(roundStates) {
+    return roundStates.some(
+      (state) => state.golfswingEvent?.triggered && state.golfswingEvent?.isSuperGolfswing === true
+    );
+  }
+
   hasParty(roundStates) {
     return roundStates.some((state) => state.partyEvent?.triggered);
   }
@@ -1897,7 +2194,13 @@ export class GameServer {
   }
 
   resolveFeatureBuyStrategy(strategy) {
-    const allowed = new Set(["bonusEntry", "superBonusEntry", "partyEntry"]);
+    const allowed = new Set([
+      "bonusEntry",
+      "superBonusEntry",
+      "partyEntry",
+      "golfswingEntry",
+      "superGolfswingEntry",
+    ]);
     return allowed.has(strategy) ? strategy : null;
   }
 
@@ -1910,6 +2213,12 @@ export class GameServer {
     }
     if (strategy === "partyEntry") {
       return this.hasParty(roundStates);
+    }
+    if (strategy === "golfswingEntry") {
+      return this.hasGolfswing(roundStates);
+    }
+    if (strategy === "superGolfswingEntry") {
+      return this.hasSuperGolfswing(roundStates);
     }
     return false;
   }
@@ -1946,6 +2255,8 @@ export class GameServer {
       "stompEntry",
       "crushEntry",
       "partyEntry",
+      "golfswingEntry",
+      "superGolfswingEntry",
     ]);
 
     const generateOnce = (boardStrategy = ticketStrategy) => this.generateRoundStatesOnce({
@@ -1955,6 +2266,18 @@ export class GameServer {
     });
 
     if (normalizedFeatureBuy) {
+      if (normalizedFeatureBuy === "golfswingEntry" || normalizedFeatureBuy === "superGolfswingEntry") {
+        const maxAttempts = 1000;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          const roundStates = generateOnce(normalizedFeatureBuy);
+          const ticket = roundStates[0]?.roundMeta?.ticket;
+          if (ticket && this.isTicketMatch(ticket, roundStates)) {
+            return this.applyFeatureBuyBucket(roundStates, normalizedFeatureBuy);
+          }
+        }
+        throw new Error(`Could not find ${normalizedFeatureBuy} outcome`);
+      }
+
       const maxAttempts = 100000;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const roundStates = generateOnce("normal");
@@ -2007,6 +2330,8 @@ export class GameServer {
     if (ticket === "stompEntry") return this.hasStomp(roundStates);
     if (ticket === "crushEntry") return this.hasCrush(roundStates);
     if (ticket === "partyEntry") return this.hasParty(roundStates);
+    if (ticket === "golfswingEntry") return this.hasGolfswing(roundStates);
+    if (ticket === "superGolfswingEntry") return this.hasSuperGolfswing(roundStates);
     return false;
   }
 }

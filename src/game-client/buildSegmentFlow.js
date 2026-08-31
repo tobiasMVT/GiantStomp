@@ -17,6 +17,11 @@ export function buildSegmentFlow({
   const hasStomp = !!gameState.stompEvent?.triggered;
   const hasCrush = !!gameState.crushEvent?.triggered;
   const hasParty = !!gameState.partyEvent?.triggered;
+  const hasGolfswing = !!gameState.golfswingEvent?.triggered;
+  const golfJackpotWin = hasGolfswing
+    ? Math.max(0, Number(gameState.golfswingEvent?.jackpotWin || 0))
+    : 0;
+  const mainTwa = Math.max(0, (gameState.twa || 0) - golfJackpotWin);
   const isBonusCashSpin = action === "freespin" && gameState.isBonus;
   const hasBonusLandings = isBonusCashSpin
     && Array.isArray(gameState.bonusLandings)
@@ -37,7 +42,7 @@ export function buildSegmentFlow({
   };
   const mainWinHoldMs = flowInteractionPolicy.mainWinHoldAfterCountUpMs ?? 0;
   const shouldHoldMainWin = !isBonusCashSpin
-    && (gameState.twa || 0) > 0
+    && mainTwa > 0
     && mainWinHoldMs > 0;
 
   return [
@@ -139,9 +144,9 @@ export function buildSegmentFlow({
     {
       checkpoint: true,
       enabled: !isBonusCashSpin,
-      run: () => scene.updateCountUp(gameState.twa || 0, {
+      run: () => scene.updateCountUp(mainTwa, {
         fast: true,
-        duration: scene.getMainCountUpDuration?.(gameState.twa || 0) ?? 140,
+        duration: scene.getMainCountUpDuration?.(mainTwa) ?? 140,
       }),
     },
     {
@@ -149,6 +154,21 @@ export function buildSegmentFlow({
       enabled: shouldHoldMainWin,
       run: () => waitCancellable?.(mainWinHoldMs),
       onSkipAction: () => cancelActiveDelay?.(),
+    },
+    {
+      checkpoint: hasGolfswing,
+      enabled: hasGolfswing,
+      run: () => scene.presentGolfswingFeature?.(gameState.golfswingEvent),
+      onSkipAction: skipVisual,
+    },
+    {
+      checkpoint: hasGolfswing && golfJackpotWin > 0,
+      enabled: hasGolfswing && golfJackpotWin > 0,
+      run: () => scene.updateCountUp(gameState.twa || 0, {
+        fast: true,
+        duration: scene.getMainCountUpDuration?.(gameState.twa || 0, mainTwa) ?? 140,
+        skipStompCoinCollect: true,
+      }),
     },
   ];
 }

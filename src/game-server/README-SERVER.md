@@ -96,10 +96,11 @@ loops until a natural stomp is found.
 
 ## Ticket Strategies
 
-- `normal`: natural weighted-symbol board generation.
+- `normal`: natural weighted-symbol board generation. Internal `noWin` ticket draws may inject a small 3-reel symbol win when `symHitRateAdjustments.winInjection` rolls (normal strategy only).
 - `noWin`: a paid spin without a ways payout.
 - `waysWin`: a paid spin containing a ways win.
 - `bonusEntry`: a paid spin that forces crushed animals and guaranteed bonus entry.
+- `golfswingEntry` / `superGolfswingEntry`: dev and Bet+ golf swing entry (super forces unicorn pick + super jackpot table).
 
 The forced-outcome development endpoints remain compatible with these strategy and
 ticket names.
