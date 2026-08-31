@@ -18,6 +18,9 @@ const flowInteractionPolicy = {
   // Hold when win >= betSize so the payout can be read (ms).
   significantWinHoldAfterCountUpMs: 900,
 
+  // Minimum beat after party resolves, even on zero or sub-bet wins (ms).
+  partyPostHoldMs: 420,
+
   // Feature bumps on small wins (ms).
   featureWinHoldAfterCountUpMs: {
     stomp: 220,

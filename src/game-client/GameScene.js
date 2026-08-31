@@ -152,6 +152,12 @@ const BONUS_METER_DEPTH = {
   activeNumber: DEPTH.ui + 6,
   debug: DEPTH.ui + 7,
 };
+const OUCH_LADDER_DEPTH = {
+  ladder: DEPTH.stomp + 1,
+  multipliers: DEPTH.stomp + 2,
+  footMarker: DEPTH.stomp + 3,
+  hammer: DEPTH.stomp + 4,
+};
 const STOMP_COIN_SCALE_MIN = 0.13;
 const STOMP_COIN_SCALE_MAX = 0.15;
 const WIN_CAP = Math.max(0, Number(clientConfig.wincap) || 0);
@@ -262,7 +268,9 @@ export class GameScene extends Phaser.Scene {
     this.ouchTrapPowerMultiplierIndex = null;
     this.ouchTheme = null;
     this.ouchFoot = null;
-    this.ouchGear = null;
+    this.ouchBankedHammerSprites = [];
+    this.ouchLadderNextBlinkTween = null;
+    this.ouchLadderNextBlinkIndex = null;
     this.ouchSnare = null;
     this.ouchRope = null;
     this.ouchTrapTension = 0;
@@ -271,11 +279,14 @@ export class GameScene extends Phaser.Scene {
     this.ouchCoinCollectQueue = null;
     this.musicMuted = false;
     this.activeAnimalCrushSfx = null;
+    this.activeAngerMeterSfx = null;
+    this.activeAngerMeterFadeTween = null;
     this.activeOuchLaughSfx = null;
     this.activeOuchCelebrationSfx = null;
     this.activePartyDiscoMusic = null;
     this.mainThemeSuppressedAfterPartyStomp = false;
     this.partyStompScratchTimer = null;
+    this.partyStompScratchPending = false;
     this.partyStompMainThemeTimer = null;
     this.partyStompMainThemeFadeTween = null;
     this.activeGolfFeatureMusic = null;
@@ -997,8 +1008,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   createDamageMeter(segments = []) {
+    this.stopOuchLadderNextBlink();
     this.damageMeterObjects?.forEach((object) => object?.destroy?.());
     this.damageMeterObjects = [];
+    this.ouchBankedHammerSprites = [];
     this.damageMeterEntries = [];
     this.damageMeterValues = [];
     this.damageMeterLadder = null;
@@ -1058,11 +1071,11 @@ export class GameScene extends Phaser.Scene {
 
     this.damageMeterLadder = this.add.image(layout.centerX, layout.centerY, "ouch_damage_meter_ladder")
       .setDisplaySize(layout.artWidth, layout.artHeight)
-      .setDepth(DEPTH.board + 1);
+      .setDepth(OUCH_LADDER_DEPTH.ladder);
     this.damageMeterFoot = this.add.image(layout.slots[0]?.x || layout.centerX, layout.startY, "ouch_damage_meter_foot")
       .setOrigin(0.5)
       .setScale(layout.scale * 0.72)
-      .setDepth(DEPTH.symbols + 5);
+      .setDepth(OUCH_LADDER_DEPTH.footMarker);
     this.damageMeterObjects.push(this.damageMeterLadder, this.damageMeterFoot);
 
     values.forEach((value, index) => {
@@ -1073,7 +1086,7 @@ export class GameScene extends Phaser.Scene {
         color: "#fff1c4",
         stroke: "#1a1007",
         strokeThickness: OUCH_LADDER_MULTIPLIER_STROKE,
-      }).setOrigin(0, 0.5).setDepth(DEPTH.symbols + 4);
+      }).setOrigin(0, 0.5).setDepth(OUCH_LADDER_DEPTH.multipliers);
       this.damageMeterEntries.push({
         value,
         marker: null,
@@ -1359,6 +1372,34 @@ export class GameScene extends Phaser.Scene {
     return index >= 0 ? index : Math.max(0, segments.length - remaining.length);
   }
 
+  stopOuchLadderNextBlink() {
+    this.ouchLadderNextBlinkTween?.stop?.();
+    this.ouchLadderNextBlinkTween?.remove?.();
+    this.ouchLadderNextBlinkTween = null;
+    if (this.ouchLadderNextBlinkIndex != null) {
+      const entry = this.damageMeterEntries?.[this.ouchLadderNextBlinkIndex];
+      entry?.numberSprite?.setAlpha(1);
+    }
+    this.ouchLadderNextBlinkIndex = null;
+  }
+
+  startOuchLadderNextBlink(nextIndex = 0) {
+    if (!this.damageMeterUsesOuchLadder) return;
+    this.stopOuchLadderNextBlink();
+    const entry = this.damageMeterEntries?.[nextIndex];
+    if (!entry?.numberSprite?.active) return;
+    this.ouchLadderNextBlinkIndex = nextIndex;
+    entry.numberSprite.setAlpha(1);
+    this.ouchLadderNextBlinkTween = this.tweens.add({
+      targets: entry.numberSprite,
+      alpha: 0.34,
+      duration: 460,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+  }
+
   applyDamageMeterHighlight(activeIndex = 0) {
     this.damageMeterActiveIndex = activeIndex;
     this.damageMeterHighlightIndex = activeIndex;
@@ -1460,6 +1501,8 @@ export class GameScene extends Phaser.Scene {
         let numberStroke = "#1a1007";
         let numberScale = 1;
         let strokeThickness = OUCH_LADDER_MULTIPLIER_STROKE;
+        let fontSize = OUCH_LADDER_MULTIPLIER_FONT_SIZE;
+        let fontStyle = "normal";
 
         if (isPassed && isBanked) {
           numberColor = "#ffe5a0";
@@ -1469,15 +1512,17 @@ export class GameScene extends Phaser.Scene {
           numberColor = "#d4dcc8";
           numberScale = 0.94;
         } else if (isActive) {
-          numberColor = "#fff8dc";
-          numberStroke = "#3b1d08";
-          numberScale = 1.14;
-          strokeThickness = 4;
+          numberColor = ladderColor;
+          numberStroke = "#1a1007";
+          numberScale = 1.16;
+          strokeThickness = OUCH_LADDER_MULTIPLIER_STROKE + 1;
+          fontSize = Math.round(OUCH_LADDER_MULTIPLIER_FONT_SIZE * 1.18);
+          fontStyle = "bold";
         } else if (isNext) {
-          numberColor = "#fff3c4";
-          numberStroke = "#482406";
-          numberScale = 1.1;
-          strokeThickness = 3.5;
+          numberColor = ladderColor;
+          numberStroke = "#1a1007";
+          numberScale = 1.02;
+          strokeThickness = OUCH_LADDER_MULTIPLIER_STROKE;
         } else {
           numberColor = ladderColor;
           numberScale = 1.02;
@@ -1488,6 +1533,8 @@ export class GameScene extends Phaser.Scene {
           .setStroke(numberStroke, strokeThickness)
           .setAlpha(1)
           .setScale((entry.baseScale || 1) * numberScale)
+          .setFontSize(`${fontSize}px`)
+          .setFontStyle(fontStyle)
           .clearTint();
         if (isActive || isNext) {
           this.children.bringToTop(entry.numberSprite);
@@ -1512,6 +1559,13 @@ export class GameScene extends Phaser.Scene {
         )
         .setAlpha(isBanked ? 0.95 : 0);
     });
+    if (this.damageMeterUsesOuchLadder) {
+      this.stopOuchLadderNextBlink();
+      const nextIndex = activeIndex + 1;
+      if (nextIndex < this.damageMeterEntries.length) {
+        this.startOuchLadderNextBlink(nextIndex);
+      }
+    }
     if (this.damageMeterOrientation === "bonus") {
       this.syncDamageMeterFootPosition(activeIndex);
     }
@@ -1640,8 +1694,8 @@ export class GameScene extends Phaser.Scene {
     this.damageMeterLadder
       ?.setPosition(layout.centerX, layout.centerY)
       .setDisplaySize(layout.artWidth, layout.artHeight)
-      .setDepth(DEPTH.board + 1);
-    this.damageMeterFoot?.setScale(layout.scale * 0.72).setDepth(DEPTH.symbols + 5);
+      .setDepth(OUCH_LADDER_DEPTH.ladder);
+    this.damageMeterFoot?.setScale(layout.scale * 0.72).setDepth(OUCH_LADDER_DEPTH.footMarker);
     this.damageMeterEntries.forEach((entry, index) => {
       const slot = layout.slots[index];
       entry.numberSprite?.setPosition(layout.numberX, slot?.y || layout.startY);
@@ -1758,6 +1812,154 @@ export class GameScene extends Phaser.Scene {
     this.playOuchStompSfx(0.62);
   }
 
+  getOuchHammerLandingAnchor(index = 0) {
+    const layout = this.damageMeterLadderLayout || getOuchDamageMeterLadderLayout(this.damageMeterValues?.length || 0);
+    const slot = this.damageMeterSlots?.[index] || layout.slots?.[index];
+    const scrollY = this.ouchScrollY || 0;
+    const textLift = 34;
+    if (!slot) {
+      const landX = layout.numberX ?? layout.leftX + 4;
+      const landY = GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.5 - scrollY - textLift;
+      return {
+        landX,
+        landY,
+        impactY: landY + textLift * 0.55,
+        spawnX: landX,
+        spawnY: GRID_OFFSET_Y - 28,
+      };
+    }
+    const landX = layout.numberX + 18;
+    const landY = slot.y - scrollY - textLift;
+    return {
+      landX,
+      landY,
+      impactY: slot.y - scrollY,
+      spawnX: landX + Phaser.Math.Between(-3, 3),
+      spawnY: GRID_OFFSET_Y - 28,
+    };
+  }
+
+  spawnOuchHammerKabom(x, y, { fast = false } = {}) {
+    const depth = OUCH_LADDER_DEPTH.hammer + 1;
+    const ringColors = [0xffe08a, 0xffb347, 0xff6b35];
+    const bursts = ringColors.map((color, index) => {
+      const ring = this.add.circle(x, y, fast ? 10 : 14, color, 0.34 - index * 0.08)
+        .setDepth(depth)
+        .setStrokeStyle(fast ? 2 : 3, 0xffffff, 0.72 - index * 0.14);
+      return this.tweenPromise({
+        targets: ring,
+        scaleX: fast ? 2.8 + index * 0.55 : 3.6 + index * 0.7,
+        scaleY: fast ? 2.8 + index * 0.55 : 3.6 + index * 0.7,
+        alpha: 0,
+        duration: fast ? 180 + index * 40 : 260 + index * 55,
+        delay: index * (fast ? 18 : 28),
+        ease: "Quad.easeOut",
+        onComplete: () => ring.destroy(),
+      });
+    });
+    const dustColors = [0xf2d39b, 0xffc56b, 0xd8a866, 0xff8c42, 0x9b6a3c];
+    const dust = Array.from({ length: fast ? 14 : 20 }, (_, dustIndex) => (
+      this.spawnCartoonDustPuff(x, y, dustColors, dustIndex, fast ? 14 : 20, dustIndex * 6, fast ? 1.05 : 1.35)
+    ));
+    this.cameras.main.shake(fast ? 72 : 110, fast ? 0.004 : 0.007);
+    this.playRandomConstructionSfx();
+    this.playSfx("wins_explode", { volume: fast ? 0.42 : 0.52 });
+    return Promise.all([...bursts, ...dust]);
+  }
+
+  async presentOuchDamageHammerLanding(targetIndex = 0, { fast = false } = {}) {
+    if (this.fastForwardRequested) return;
+
+    const anchor = this.getOuchHammerLandingAnchor(targetIndex);
+    const scale = SYMBOL_SCALE * 0.85;
+    const hammer = this.add.image(anchor.spawnX, anchor.spawnY, String(DAMAGE_SYMBOL))
+      .setScale(scale)
+      .setDepth(OUCH_LADDER_DEPTH.hammer)
+      .setAlpha(0.95);
+
+    if (targetIndex === 0) {
+      this.setDamageMeterStatus("HAMMER BANKS DEPTH", "#ffe7a6");
+    }
+
+    const dropMs = fast ? 260 : 380;
+    await this.tweenPromise({
+      targets: hammer,
+      x: anchor.landX,
+      y: anchor.landY,
+      angle: 0,
+      duration: dropMs,
+      ease: "Cubic.easeIn",
+    });
+
+    await Promise.all([
+      this.spawnOuchHammerKabom(anchor.impactX ?? anchor.landX, anchor.impactY ?? anchor.landY, { fast }),
+      this.tweenPromise({
+        targets: hammer,
+        scaleX: scale * 1.12,
+        scaleY: scale * 1.12,
+        duration: fast ? 72 : 105,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }),
+      this.pulseDamageMeterHighlight(targetIndex, { fast }),
+    ]);
+
+    this.ouchBankedHammerSprites = this.ouchBankedHammerSprites || [];
+    this.ouchBankedHammerSprites.push(hammer);
+    this.damageMeterObjects.push(hammer);
+  }
+
+  async presentOuchRatchetFootPull(impact = {}, { fast = false, pullCount = 4 } = {}) {
+    const foot = impact?.foot || this.ouchFoot;
+    if (!foot || foot.destroyed) return;
+
+    const footScale = impact.footScale ?? 1;
+    const nudgeDown = fast ? 5 : 7;
+    const nudgeUp = fast ? 2 : 3;
+    const pullMs = fast ? 50 : 70;
+    const reboundMs = fast ? 38 : 52;
+    const pauseMs = fast ? 28 : 40;
+    const totalPush = nudgeDown * pullCount;
+
+    if (this.fastForwardRequested) {
+      foot.y += totalPush;
+      impact.ouchPushDepth = (impact.ouchPushDepth || 0) + totalPush;
+      this.refreshOuchTrapRig();
+      return;
+    }
+
+    let currentY = foot.y;
+    for (let pull = 1; pull <= pullCount; pull += 1) {
+      this.playRandomConstructionSfx();
+      this.cameras.main.shake(fast ? 38 : 52, fast ? 0.002 : 0.003);
+      const targetY = currentY + nudgeDown + pull * 0.8;
+      await this.tweenPromise({
+        targets: foot,
+        y: targetY,
+        scaleX: footScale * 1.02,
+        scaleY: footScale * 0.96,
+        duration: pullMs,
+        ease: "Quad.easeIn",
+        onUpdate: () => this.refreshOuchTrapRig(),
+      });
+      currentY = targetY;
+      impact.ouchPushDepth = (impact.ouchPushDepth || 0) + nudgeDown + pull * 0.8;
+
+      if (pull < pullCount) {
+        const reboundY = currentY - nudgeUp;
+        await this.tweenPromise({
+          targets: foot,
+          y: reboundY,
+          duration: reboundMs,
+          ease: "Quad.easeOut",
+          onUpdate: () => this.refreshOuchTrapRig(),
+        });
+        currentY = reboundY;
+        await this.waitForPresentation(pauseMs, { skippable: true });
+      }
+    }
+  }
+
   async presentOuchPassedMultiplierReplay(targetIndex = 0, impact = {}, ouchEvent = {}, betSize = 1) {
     if (targetIndex <= 0 || !impact?.foot) return;
 
@@ -1771,8 +1973,8 @@ export class GameScene extends Phaser.Scene {
 
     for (let index = 0; index < targetIndex; index += 1) {
       this.applyDamageMeterHighlight(index);
-      await this.presentOuchDamageMeterCharge(1, 0, { fast: true });
-      await this.presentOuchFootRecoilStomp(impact, { fast: true });
+      await this.presentOuchDamageHammerLanding(index, { fast: true });
+      await this.presentOuchRatchetFootPull(impact, { fast: true });
       await this.pulseDamageMeterHighlight(index, { fast: true });
       await this.moveOuchLadderFootToIndex(index, { fast: true });
       this.applyDamageMeterHighlight(index + 1);
@@ -3427,20 +3629,24 @@ export class GameScene extends Phaser.Scene {
       const reactorIndex = (reactorStartIndex + index) % reactors.length;
       let reactor = this.getAngerReactorSource(reactors[reactorIndex], fallback);
       if (!reactor) continue;
-      reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
-        duration: emotionDuration,
-      });
-      await Promise.all([
-        this.tweenPromise({
-          targets: reactor,
-          scaleX: reactor.scaleX * 1.2,
-          scaleY: reactor.scaleY * 1.2,
-          duration: 120,
-          yoyo: true,
-          ease: "Back.easeOut",
-        }),
-        this.launchAngerMeterForKill(reactor.x, reactor.y, killEvent),
-      ]);
+      if (!this.shouldDeferPartyAngryEmotion()) {
+        reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
+          duration: emotionDuration,
+        });
+        await Promise.all([
+          this.tweenPromise({
+            targets: reactor,
+            scaleX: reactor.scaleX * 1.2,
+            scaleY: reactor.scaleY * 1.2,
+            duration: 120,
+            yoyo: true,
+            ease: "Back.easeOut",
+          }),
+          this.launchAngerMeterForKill(reactor.x, reactor.y, killEvent),
+        ]);
+      } else {
+        await this.launchAngerMeterForKill(reactor.x, reactor.y, killEvent);
+      }
       if (killEvent?.ticked) {
         await this.updateAngerMeter({
           count: this.getNextAngerDisplayCount(),
@@ -3573,23 +3779,30 @@ export class GameScene extends Phaser.Scene {
       );
 
       if (reactor) {
-        reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
-          duration: fast ? 40 : 80,
-        });
-        await Promise.all([
-          this.tweenPromise({
-            targets: reactor,
-            scaleX: reactor.scaleX * (burst ? 1.3 : 1.18),
-            scaleY: reactor.scaleY * (burst ? 1.3 : 1.18),
-            duration: fast ? 50 : 90,
-            yoyo: true,
-            ease: "Back.easeOut",
-          }),
-          this.launchAngerMeterStream(reactor.x, reactor.y, count - 1, {
+        if (!this.shouldDeferPartyAngryEmotion()) {
+          reactor = await this.crossfadeSpriteAnimalEmotion(reactor, "angry", {
+            duration: fast ? 40 : 80,
+          });
+          await Promise.all([
+            this.tweenPromise({
+              targets: reactor,
+              scaleX: reactor.scaleX * (burst ? 1.3 : 1.18),
+              scaleY: reactor.scaleY * (burst ? 1.3 : 1.18),
+              duration: fast ? 50 : 90,
+              yoyo: true,
+              ease: "Back.easeOut",
+            }),
+            this.launchAngerMeterStream(reactor.x, reactor.y, count - 1, {
+              orbStagger: fast ? 10 : 16,
+              fast: true,
+            }),
+          ]);
+        } else {
+          await this.launchAngerMeterStream(reactor.x, reactor.y, count - 1, {
             orbStagger: fast ? 10 : 16,
             fast: true,
-          }),
-        ]);
+          });
+        }
       } else {
         const target = this.getAngerSegmentTarget(count - 1);
         await this.spawnAngerImpactSpark(target.x, target.y, { weak: !burst });
@@ -4201,9 +4414,23 @@ export class GameScene extends Phaser.Scene {
       ...(this.damageMeterUsesOuchLadder
         ? this.damageMeterEntries.map((entry) => entry.numberSprite).filter(Boolean)
         : []),
+      ...(this.ouchBankedHammerSprites || []),
       this.ouchGear,
       ...sprites,
     ].filter(Boolean);
+  }
+
+  shouldDeferPartyAngryEmotion() {
+    return this.partyActive
+      || !!this.activePartyDiscoMusic
+      || this.partyStompScratchPending;
+  }
+
+  killAnimalSpriteTweens() {
+    this.reelSprites.flat().forEach((sprite) => {
+      if (!sprite?.active || !ANIMAL_SYMBOLS.has(Number(sprite.symbolId))) return;
+      this.tweens.killTweensOf(sprite);
+    });
   }
 
   getAnimalEmotionTexture(symbol, emotion = this.animalEmotion) {
@@ -4214,6 +4441,11 @@ export class GameScene extends Phaser.Scene {
 
   async crossfadeSpriteAnimalEmotion(sprite, emotion = "normal", { duration = 120 } = {}) {
     if (!sprite?.active || !ANIMAL_SYMBOLS.has(Number(sprite.symbolId))) return sprite;
+    const reel = sprite.reel;
+    const row = sprite.row;
+    if (this.reelSprites[reel]?.[row] !== sprite) {
+      return this.reelSprites[reel]?.[row] || sprite;
+    }
     const texture = this.getAnimalEmotionTexture(sprite.symbolId, emotion)
       || String(sprite.symbolId);
     if (sprite.baseTextureKey === texture) return sprite;
@@ -5934,11 +6166,14 @@ export class GameScene extends Phaser.Scene {
       ease: "Quad.easeIn",
     });
 
-    // Change before the final drop so even the animals under the foot get a readable scared beat.
-    await this.crossfadeAnimalEmotion("scared", {
-      duration: this.fastForwardRequested ? 45 : 100,
-    });
-    await this.waitForPresentation(this.fastForwardRequested ? 30 : 120, { skippable: true });
+    const partyStompActive = this.partyActive || this.activePartyDiscoMusic;
+    // Party animals stay celebrating until the record scratch; normal stomps get a scared beat first.
+    if (!partyStompActive) {
+      await this.crossfadeAnimalEmotion("scared", {
+        duration: this.fastForwardRequested ? 45 : 100,
+      });
+      await this.waitForPresentation(this.fastForwardRequested ? 30 : 120, { skippable: true });
+    }
 
     await this.tweenPromise({
       targets: foot,
@@ -8421,8 +8656,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   async updateAngerMeter(angerMeter = {}) {
+    const prevCount = Number(this.angerMeterState?.count) || 0;
     const max = Math.max(1, Number(angerMeter.max) || ANGER_SEGMENT_COUNT);
     const count = Phaser.Math.Clamp(Number(angerMeter.count) || 0, 0, max);
+    if (count > prevCount) {
+      if (count >= max) {
+        this.fadeOutAngerMeterFillSfx();
+        this.playBonusConfirmSfx();
+      } else {
+        this.playAngerMeterFillSfx();
+      }
+    }
     const litCount = this.getLitAngerSegmentCount(count, max);
     const useRainbow = angerMeter.rainbow === true;
     this.angerMeterState = { count, max, rainbow: useRainbow };
@@ -8454,7 +8698,7 @@ export class GameScene extends Phaser.Scene {
     }));
     this.syncAngerBlink(count, max);
     this.syncAngerBonusBadge(count, max);
-    if (count >= ANGER_SEGMENT_COUNT - 1 && this.animalEmotion !== "angry") {
+    if (count >= ANGER_SEGMENT_COUNT - 1 && this.animalEmotion !== "angry" && !this.shouldDeferPartyAngryEmotion()) {
       await this.crossfadeAnimalEmotion("angry", {
         duration: this.fastForwardRequested ? 50 : 150,
       });
@@ -8579,6 +8823,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   resetAngerMeter() {
+    this.stopAngerMeterFillSfx();
     this.stopAngerBlink();
     this.stopAngerBonusPulse();
     this.stopSuperBonusRainbowTween();
@@ -8598,6 +8843,7 @@ export class GameScene extends Phaser.Scene {
     this.scheduleDeferredWinDisplayClear();
     this.clearStompLandedCoins();
     this.clearPartyStompScratchTimer();
+    this.partyStompScratchPending = false;
     this.clearPartyStompMainThemeTimer();
     this.mainThemeSuppressedAfterPartyStomp = false;
     if (!this.isInBonusMode && !this.isPostBonusOuch) {
@@ -8675,6 +8921,7 @@ export class GameScene extends Phaser.Scene {
 
   async leaveBonus() {
     if (!this.isInBonusMode && !this.isPostBonusOuch) return;
+    this.stopOuchLadderNextBlink();
     this.isInBonusMode = false;
     this.isPostBonusOuch = false;
     this.ouchTrapPowerMultiplierIndex = null;
@@ -8989,23 +9236,32 @@ export class GameScene extends Phaser.Scene {
     this.clearPartyStompScratchTimer();
     if (!this.partyActive && !this.activePartyDiscoMusic) return;
 
+    this.partyStompScratchPending = true;
     const delayMs = this.fastForwardRequested
       ? Math.max(60, Math.round(PARTY_STOMP_SCRATCH_DELAY_MS * 0.4))
       : PARTY_STOMP_SCRATCH_DELAY_MS;
     this.partyStompScratchTimer = this.time.delayedCall(delayMs, () => {
       this.partyStompScratchTimer = null;
-      this.playPartyStompScratch();
+      void this.playPartyStompScratch();
     });
   }
 
-  playPartyStompScratch() {
-    if (!this.partyActive && !this.activePartyDiscoMusic) return;
+  async playPartyStompScratch() {
+    if (!this.partyStompScratchPending) return;
     this.stopPartyAnimalCheer({ immediate: true });
     this.mainThemeSuppressedAfterPartyStomp = true;
     this.clearPartyAtmosphere({ immediate: true });
     this.clearTotalWinCelebration();
     this.stopPartyDiscoMusic({ restoreMainTheme: false });
     this.playSfx("party_scratch", { volume: 0.88 });
+    this.killAnimalSpriteTweens();
+    try {
+      await this.crossfadeAnimalEmotion("angry", {
+        duration: this.fastForwardRequested ? 50 : 120,
+      });
+    } finally {
+      this.partyStompScratchPending = false;
+    }
     this.schedulePartyStompMainThemeFadeIn();
   }
 
@@ -9118,6 +9374,70 @@ export class GameScene extends Phaser.Scene {
     this.playSfx(key, { volume: 0.76 });
   }
 
+  stopAngerMeterFillSfx() {
+    this.activeAngerMeterFadeTween?.stop?.();
+    this.activeAngerMeterFadeTween = null;
+    const sound = this.activeAngerMeterSfx;
+    if (!sound) return;
+    this.activeAngerMeterSfx = null;
+    sound.stop();
+    sound.destroy();
+  }
+
+  fadeOutAngerMeterFillSfx({ duration = null } = {}) {
+    const sound = this.activeAngerMeterSfx;
+    if (!sound) return;
+
+    this.activeAngerMeterFadeTween?.stop?.();
+    this.activeAngerMeterFadeTween = null;
+
+    const fadeMs = duration ?? (this.fastForwardRequested ? 120 : 220);
+    const startVolume = Number(sound.volume) || 0.62;
+    const counter = { v: startVolume };
+
+    this.activeAngerMeterFadeTween = this.tweens.add({
+      targets: counter,
+      v: 0,
+      duration: fadeMs,
+      ease: "Quad.easeIn",
+      onUpdate: () => {
+        if (sound?.isPlaying) sound.setVolume(counter.v);
+      },
+      onComplete: () => {
+        this.activeAngerMeterFadeTween = null;
+        if (this.activeAngerMeterSfx === sound) {
+          this.activeAngerMeterSfx = null;
+        }
+        sound.stop();
+        sound.destroy();
+      },
+    });
+  }
+
+  playAngerMeterFillSfx() {
+    this.stopAngerMeterFillSfx();
+    if (!this.sound || !this.cache.audio.exists("anger_meter")) return;
+    if (this.fastForwardRequested && soundInteractionPolicy.anger_meter?.allowDuringFastForward === false) return;
+
+    const sound = this.sound.add("anger_meter", {
+      volume: 0.62 * (this.fastForwardRequested ? 0.55 : 1),
+    });
+    this.activeAngerMeterSfx = sound;
+    const release = () => {
+      if (this.activeAngerMeterSfx === sound) {
+        this.activeAngerMeterSfx = null;
+      }
+      sound.destroy();
+    };
+    sound.once("complete", release);
+    sound.once("stop", release);
+    if (!sound.play()) release();
+  }
+
+  playBonusConfirmSfx() {
+    this.playSfx("bonus_confirm", { volume: 0.72 });
+  }
+
   playAnimalCrushSfx() {
     if (this.activeAnimalCrushSfx?.isPlaying) return;
     const key = Phaser.Utils.Array.GetRandom(ANIMAL_CRUSH_SFX);
@@ -9158,7 +9478,7 @@ export class GameScene extends Phaser.Scene {
   startBonusTheme() {
     this.mainTheme?.stop();
     if (this.musicMuted || this.bonusTheme?.isPlaying) return;
-    this.bonusTheme = this.sound.add("theme_bonus", { loop: true, volume: 0.64 });
+    this.bonusTheme = this.sound.add("theme_bonus", { loop: true, volume: 0.78 });
     this.bonusTheme.play();
   }
 

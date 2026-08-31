@@ -52,7 +52,7 @@ Triggered from `Client.reactOnResponse` when bonus ends (`nextAction === "spin"`
 1. `presentBonusExitSequence(gameState)` crossfades to `ouch_background`, fake doll spin.
 2. `presentOuchStompSequence(ouchStompEvent)`:
    - **Impact:** foot slams trap, `spawnOuchDebrisBurst`, random `ouch_stomp1/2`, start `ouch_background-music`.
-   - **Banked replay:** bonus-advanced multiplier segments are gold `BANKED` stomps. They replay as fast lift-and-slam stomps with decorative gold coins (no win credit) before any risky step.
+   - **Banked replay:** bonus-advanced multiplier segments are gold `BANKED` stomps. Each banked rung replays as: damage symbol (1000) drops from the top and nests beside the skipped ladder rung → `ouch_damage_confirm` scratch SFX + rung pulse → snared giant foot ratchets downward (`construction_1/2/3`, four nudges) → ladder foot marker advances → decorative gold coins (no win credit). Ouch ladder multipliers render above the snared giant foot depth.
    - **Per step:** scroll pit up, advance multiplier highlight, foot pushes deeper (no lift wobble), coins → count-up ticks to `step.winAmount`.
    - **Step 2+:** the next multiplier tile charges for the full `stepIntervalMs` before revealing the deeper stomp; random pain scream + gore SFX then play on success.
    - **Success cue:** the target tile makes a bright confirmation swap, launches star particles, and receives short downward arrows before the foot moves deeper.
@@ -62,4 +62,4 @@ Triggered from `Client.reactOnResponse` when bonus ends (`nextAction === "spin"`
 
 UI: bonus uses the horizontal multiplier strip. Ouch rebuilds the same segment style as a vertical `STOMP DEPTH` rail on the left side of the pit, ordered from the low multiplier at the top to the high multiplier at the bottom. Gold banked steps remain distinct from normal completed and risky steps.
 
-Assets: `src/game-client/assets/giantstomp/sounds/ouch_*`, `giant_pain_scream*`.
+Assets: `src/game-client/assets/giantstomp/sounds/ouch_*`, `giant_pain_scream*`, `ouch_damage_confirm` (scratch confirm on hammer landing).

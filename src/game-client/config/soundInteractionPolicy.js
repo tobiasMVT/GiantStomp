@@ -66,6 +66,9 @@ const soundInteractionPolicy = {
   party_scratch: {
     allowDuringFastForward: false
   },
+  ouch_damage_confirm: {
+    allowDuringFastForward: false
+  },
   golf_swing: {
     allowDuringFastForward: false
   },
@@ -73,6 +76,12 @@ const soundInteractionPolicy = {
     allowDuringFastForward: false
   },
   unicorn_appear: {
+    allowDuringFastForward: false
+  },
+  anger_meter: {
+    allowDuringFastForward: false
+  },
+  bonus_confirm: {
     allowDuringFastForward: false
   }
 };

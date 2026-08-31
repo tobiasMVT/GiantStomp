@@ -82,9 +82,15 @@ export function buildSegmentFlow({
     syncBonusUi();
   };
   const mainWinHoldMs = resolveMainWinHoldMs(gameState, flowInteractionPolicy, mainTwa);
+  const partyPostHoldMs = hasParty && !isBonusCashSpin
+    ? (flowInteractionPolicy.partyPostHoldMs ?? 0)
+    : 0;
+  const effectiveMainWinHoldMs = partyPostHoldMs > 0
+    ? Math.max(mainWinHoldMs, partyPostHoldMs)
+    : mainWinHoldMs;
   const shouldHoldMainWin = !isBonusCashSpin
-    && mainTwa > 0
-    && mainWinHoldMs > 0;
+    && effectiveMainWinHoldMs > 0
+    && (mainTwa > 0 || hasParty);
   const golfJackpotHoldMs = resolveGolfJackpotWinHoldMs(
     gameState,
     flowInteractionPolicy,
@@ -206,7 +212,7 @@ export function buildSegmentFlow({
     {
       checkpoint: false,
       enabled: shouldHoldMainWin,
-      run: () => waitCancellable?.(mainWinHoldMs),
+      run: () => waitCancellable?.(effectiveMainWinHoldMs),
       onSkipAction: () => cancelActiveDelay?.(),
     },
     {

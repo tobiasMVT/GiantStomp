@@ -41,6 +41,8 @@ const OUCH_BACKGROUND_SCALE = 1.2;
 const OUCH_STOMP_OFFSET_X = 50;
 const OUCH_PIT_STEP_DELTA_Y = 88;
 const OUCH_UI_OFFSET_Y = 50;
+// Nudge ouch ladder up at scene start (~1–2 extra multiplier rungs visible; stepGap is 52px).
+const OUCH_LADDER_OFFSET_Y = -90;
 // Post-bonus pit ladder art, tuned in the ?ouchLayout=1 scene against ouch_background.
 const OUCH_METER_LADDER_SIZE = { width: 172, height: 860 };
 const OUCH_METER_LADDER_TUNING = {
@@ -57,11 +59,12 @@ const OUCH_METER_LADDER_TUNING = {
 
 const getOuchDamageMeterLadderLayout = (segmentCount) => {
   const tuning = OUCH_METER_LADDER_TUNING;
+  const ladderOffsetY = OUCH_LADDER_OFFSET_Y;
   const scale = tuning.artHeight / OUCH_METER_LADDER_SIZE.height;
   const centerX = tuning.artCenterX;
-  const centerY = tuning.artCenterY;
+  const centerY = tuning.artCenterY + ladderOffsetY;
   const leftX = tuning.guideCenterX - tuning.guideWidth / 2;
-  const topY = tuning.guideCenterY - (tuning.stepGap * (segmentCount - 1)) / 2;
+  const topY = tuning.guideCenterY + ladderOffsetY - (tuning.stepGap * (segmentCount - 1)) / 2;
   const slots = Array.from({ length: segmentCount }, (_, index) => {
     const y = topY + index * tuning.stepGap;
     return {
@@ -197,6 +200,7 @@ export {
   OUCH_STOMP_OFFSET_X,
   OUCH_PIT_STEP_DELTA_Y,
   OUCH_UI_OFFSET_Y,
+  OUCH_LADDER_OFFSET_Y,
   OUCH_METER_LADDER_SIZE,
   OUCH_METER_LADDER_TUNING,
   getOuchDamageMeterLadderLayout,

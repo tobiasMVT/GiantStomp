@@ -125,6 +125,7 @@ export function queueGameSceneAssets(load, _deps = {}) {
   );
   load.audio("party_disco", "assets/giantstomp/sounds/animaldisco.mp3");
   load.audio("party_scratch", "assets/giantstomp/sounds/scratch.mp3");
+  load.audio("ouch_damage_confirm", "assets/giantstomp/sounds/scratch.mp3");
   load.audio("golf_feature_start", "assets/giantstomp/sounds/golf_feature_starts.mp3");
   load.audio("golf_swing", "assets/giantstomp/sounds/swing.mp3");
   load.audio("golf_miss", "assets/giantstomp/sounds/giant_missing_in_golf.mp3");
@@ -133,4 +134,6 @@ export function queueGameSceneAssets(load, _deps = {}) {
     "unicorn_appear",
     "assets/giantstomp/sounds/giant-video-game-character-dialogue-vocalization-i-can-smell-you.mp3"
   );
+  load.audio("anger_meter", "assets/giantstomp/sounds/anger_meter.mp3");
+  load.audio("bonus_confirm", "assets/giantstomp/sounds/bonus_confirm.mp3");
 }
