@@ -170,6 +170,15 @@ const PARTY_SPOTLIGHT_SPECS = [
   { color: 0xb084ff, x: 0.36, angle: 20 },
 ];
 const PARTY_REEL_GAP_MS = 240;
+const PARTY_DISCO_START_SEEK_SEC = 13;
+const PARTY_STOMP_SCRATCH_DELAY_MS = 220;
+const PARTY_STOMP_MAIN_THEME_FADE_IN_DELAY_MS = 3000;
+const PARTY_STOMP_MAIN_THEME_FADE_MS = 1200;
+const GOLF_JACKPOT_MUSIC_DURATION_MS = 9000;
+const GOLF_JACKPOT_WIN_HIGHLIGHT_MS = 760;
+const GOLF_JACKPOT_DRUM_START_MS = 5000;
+const GOLF_JACKPOT_WHEEL_CONSTANT_SPIN_ROTATION = 0.84;
+const UNICORN_SYMBOL = 14;
 const BONUS_TRAP_POWER_FONT_SIZE = 26;
 const OUCH_TRAP_POWER_FONT_SIZE = 25;
 const OUCH_LADDER_MULTIPLIER_FONT_SIZE = 22;
@@ -243,6 +252,8 @@ export class GameScene extends Phaser.Scene {
     this.fastForwardRequested = false;
     this.currentWin = 0;
     this.countUpLabel = "WIN";
+    this.deferWinDisplayClear = false;
+    this.deferredWinClearTimer = null;
     this.freespinCounterValue = null;
     this.isInBonusMode = false;
     this.isBonusUiVisible = false;
@@ -262,6 +273,15 @@ export class GameScene extends Phaser.Scene {
     this.activeAnimalCrushSfx = null;
     this.activeOuchLaughSfx = null;
     this.activeOuchCelebrationSfx = null;
+    this.activePartyDiscoMusic = null;
+    this.mainThemeSuppressedAfterPartyStomp = false;
+    this.partyStompScratchTimer = null;
+    this.partyStompMainThemeTimer = null;
+    this.partyStompMainThemeFadeTween = null;
+    this.activeGolfFeatureMusic = null;
+    this.activeGolfJackpotMusic = null;
+    this.golfJackpotMusicStartedAt = null;
+    this.golfswingHudHidden = false;
     this.stompLandedCoins = [];
     this.stompCoinsRegistry = new Set();
     this.stompCoinLaunchPromises = [];
@@ -277,6 +297,7 @@ export class GameScene extends Phaser.Scene {
     this.partySpotlightTweens = [];
     this.partyBackgroundAlphaBefore = 1;
     this.partyActive = false;
+    this.partyCheerTweens = [];
     this.bonusIntroImage = null;
     this.bonusIntroShade = null;
     this.bonusIntroSunGlow = null;
@@ -2039,6 +2060,8 @@ export class GameScene extends Phaser.Scene {
   async presentBonusIntroScene() {
     this.clearPartyPresentation({ immediate: true });
     this.resetBonusIntroScene();
+    this.clearPartyStompMainThemeTimer();
+    this.mainThemeSuppressedAfterPartyStomp = false;
     this.mainTheme?.stop();
     this.crushBackground?.setAlpha(0);
     const introImage = this.bonusIntroImage;
@@ -2285,6 +2308,12 @@ export class GameScene extends Phaser.Scene {
           playedReelLandSound = true;
           this.playSfx(`land${reel + 1}`, { volume: 0.28 });
         },
+        onComplete: () => {
+          this.playUnicornAppearSfxIfNeeded(symbol);
+          if (this.partyActive) {
+            this.addPartyAnimalCheerForSprites([sprite]);
+          }
+        },
       }));
     }
     await Promise.all(tweens);
@@ -2300,6 +2329,9 @@ export class GameScene extends Phaser.Scene {
         if (reel < REELS - 1) {
           await this.waitForPresentation(reelGapMs);
         }
+      }
+      if (this.partyActive) {
+        this.startPartyAnimalCheer();
       }
       return;
     }
@@ -2332,10 +2364,19 @@ export class GameScene extends Phaser.Scene {
             playedReelLandSound = true;
             this.playSfx(`land${reel + 1}`, { volume: 0.28 });
           },
+          onComplete: () => {
+            this.playUnicornAppearSfxIfNeeded(symbol);
+            if (this.partyActive) {
+              this.addPartyAnimalCheerForSprites([sprite]);
+            }
+          },
         }));
       }
     }
     await Promise.all(tweens);
+    if (this.partyActive) {
+      this.startPartyAnimalCheer();
+    }
   }
 
   pickRandomLowSymbol() {
@@ -2501,6 +2542,7 @@ export class GameScene extends Phaser.Scene {
         duration: 300,
         delay: index * 28,
         ease: "Cubic.easeInOut",
+        onComplete: () => this.playUnicornAppearSfxIfNeeded(symbol),
       }));
     });
 
@@ -2524,6 +2566,7 @@ export class GameScene extends Phaser.Scene {
           delay: reel * 45 + row * 24,
           ease: SYMBOL_LAND_EASE,
           easeParams: SYMBOL_LAND_EASE_PARAMS,
+          onComplete: () => this.playUnicornAppearSfxIfNeeded(symbol),
         }));
       }
     }
@@ -2595,13 +2638,13 @@ export class GameScene extends Phaser.Scene {
     });
 
     await Promise.all(entries.map(({ sprite, warmGlow, brightGlow, crispGlow }, index) => {
-      const delay = index * 5;
+      const delay = index * 3;
       const pop = () => Promise.all([
         this.tweenPromise({
           targets: sprite,
           scaleX: HIGHLIGHT_SYMBOL_POP_SCALE,
           scaleY: HIGHLIGHT_SYMBOL_POP_SCALE,
-          duration: 78,
+          duration: 52,
           delay,
           ease: "Quad.easeOut",
         }),
@@ -2610,7 +2653,7 @@ export class GameScene extends Phaser.Scene {
           alpha: 0.62,
           scaleX: SYMBOL_SCALE * 1.25,
           scaleY: SYMBOL_SCALE * 1.25,
-          duration: 76,
+          duration: 50,
           delay,
           ease: "Quad.easeOut",
         })] : []),
@@ -2619,7 +2662,7 @@ export class GameScene extends Phaser.Scene {
           alpha: 0.98,
           scaleX: SYMBOL_SCALE * 1.16,
           scaleY: SYMBOL_SCALE * 1.16,
-          duration: 74,
+          duration: 48,
           delay,
           ease: "Quad.easeOut",
         })] : []),
@@ -2628,7 +2671,7 @@ export class GameScene extends Phaser.Scene {
           alpha: 0.84,
           scaleX: SYMBOL_SCALE * 1.08,
           scaleY: SYMBOL_SCALE * 1.08,
-          duration: 68,
+          duration: 44,
           delay,
           ease: "Quad.easeOut",
         })] : []),
@@ -2638,7 +2681,7 @@ export class GameScene extends Phaser.Scene {
           targets: sprite,
           scaleX: HIGHLIGHT_SYMBOL_SCALE,
           scaleY: HIGHLIGHT_SYMBOL_SCALE,
-          duration: 95,
+          duration: 62,
           ease: "Quad.easeOut",
         }),
       ];
@@ -2648,7 +2691,7 @@ export class GameScene extends Phaser.Scene {
           alpha: warmGlow.highlightBaseAlpha,
           scaleX: warmGlow.highlightBaseScale,
           scaleY: warmGlow.highlightBaseScale,
-          duration: 118,
+          duration: 78,
           ease: "Quad.easeOut",
         }));
       }
@@ -2658,7 +2701,7 @@ export class GameScene extends Phaser.Scene {
           alpha: brightGlow.highlightBaseAlpha,
           scaleX: brightGlow.highlightBaseScale,
           scaleY: brightGlow.highlightBaseScale,
-          duration: 110,
+          duration: 72,
           ease: "Quad.easeOut",
         }));
       }
@@ -2668,7 +2711,7 @@ export class GameScene extends Phaser.Scene {
           alpha: crispGlow.highlightBaseAlpha,
           scaleX: crispGlow.highlightBaseScale,
           scaleY: crispGlow.highlightBaseScale,
-          duration: 96,
+          duration: 64,
           ease: "Quad.easeOut",
         }));
       }
@@ -5035,7 +5078,7 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => this.partyFlashOverlay?.setVisible(false),
     });
 
-    this.playOuchCelebrationSfx();
+    this.playPartyDiscoMusic();
 
     this.partyDimOverlay?.setVisible(true).setAlpha(0);
     this.tweens.add({
@@ -5074,6 +5117,99 @@ export class GameScene extends Phaser.Scene {
     this.startPartySpotlightMotion();
 
     this.spawnPartyConfetti({ count: 16 });
+  }
+
+  getPartyCheerSprites() {
+    return this.reelSprites.flat().filter((sprite) => {
+      if (!sprite?.active) return false;
+      const symbol = Number(sprite.symbolId);
+      return ANIMAL_SYMBOLS.has(symbol) || symbol === UNICORN_SYMBOL;
+    });
+  }
+
+  addPartyAnimalCheerForSprites(sprites = []) {
+    if (!this.partyActive) return;
+
+    const targets = sprites.filter((sprite) => {
+      if (!sprite?.active) return false;
+      if (sprite.getData?.("partyCheerBase")) return false;
+      const symbol = Number(sprite.symbolId);
+      return ANIMAL_SYMBOLS.has(symbol) || symbol === UNICORN_SYMBOL;
+    });
+    if (!targets.length) return;
+
+    if (!this.partyCheerTweens) this.partyCheerTweens = [];
+    targets.forEach((sprite, index) => {
+      const baseX = sprite.x;
+      const baseY = sprite.y;
+      const baseScaleX = sprite.scaleX;
+      const baseScaleY = sprite.scaleY;
+      const baseAngle = sprite.angle;
+      sprite.setData("partyCheerBase", {
+        x: baseX,
+        y: baseY,
+        scaleX: baseScaleX,
+        scaleY: baseScaleY,
+        angle: baseAngle,
+      });
+
+      const hopTween = this.tweens.add({
+        targets: sprite,
+        y: baseY - Phaser.Math.Between(9, 15),
+        angle: baseAngle + Phaser.Math.Between(-7, 7),
+        scaleX: baseScaleX * Phaser.Math.FloatBetween(1.04, 1.09),
+        scaleY: baseScaleY * Phaser.Math.FloatBetween(0.92, 0.97),
+        duration: Phaser.Math.Between(340, 480) + index * 16,
+        delay: index * 38,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      const wiggleTween = this.tweens.add({
+        targets: sprite,
+        x: baseX + Phaser.Math.Between(-5, 5),
+        duration: Phaser.Math.Between(300, 420),
+        delay: index * 24,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      this.partyCheerTweens.push(hopTween, wiggleTween);
+    });
+  }
+
+  startPartyAnimalCheer() {
+    this.addPartyAnimalCheerForSprites(this.getPartyCheerSprites());
+  }
+
+  stopPartyAnimalCheer({ immediate = false } = {}) {
+    this.partyCheerTweens?.forEach((tween) => tween?.stop?.());
+    this.partyCheerTweens = [];
+
+    this.reelSprites.flat().forEach((sprite) => {
+      if (!sprite?.active) return;
+      const base = sprite.getData?.("partyCheerBase");
+      if (!base) return;
+      this.tweens.killTweensOf(sprite);
+      sprite.removeData?.("partyCheerBase");
+      if (immediate) {
+        sprite
+          .setPosition(base.x, base.y)
+          .setScale(base.scaleX, base.scaleY)
+          .setAngle(base.angle);
+        return;
+      }
+      this.tweens.add({
+        targets: sprite,
+        x: base.x,
+        y: base.y,
+        scaleX: base.scaleX,
+        scaleY: base.scaleY,
+        angle: base.angle,
+        duration: 140,
+        ease: "Quad.easeOut",
+      });
+    });
   }
 
   ensurePartyAtmosphere() {
@@ -5210,9 +5346,15 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  clearPartyPresentation({ immediate = false } = {}) {
+  clearPartyPresentation({ immediate = false, stopDisco = true, stopCheer = true } = {}) {
+    if (stopCheer) {
+      this.stopPartyAnimalCheer({ immediate });
+    }
     this.clearTotalWinCelebration();
     this.clearPartyAtmosphere({ immediate });
+    if (stopDisco) {
+      this.stopPartyDiscoMusic();
+    }
   }
 
   startTotalWinCelebration() {
@@ -5817,7 +5959,13 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.cameras.main.shake(200, 0.009);
+    if (this.partyActive || this.activePartyDiscoMusic) {
+      this.stopPartyAnimalCheer({ immediate: true });
+    }
     this.playSfx("giant_stomp", { volume: 0.78 });
+    if (this.partyActive || this.activePartyDiscoMusic) {
+      this.schedulePartyStompScratch();
+    }
     this.spawnStompImpactBurst(bounds.centerX, impactY + CELL_SIZE * 0.16, bounds.width);
     this.time.delayedCall(320, () => this.playGiantLaughSfx());
     if (crushedCells.length) {
@@ -5863,11 +6011,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   async presentStompFeature(stompEvent = {}, { roundTwa = 0 } = {}) {
-    this.clearPartyPresentation({ immediate: true });
-    if (!stompEvent?.triggered) return;
+    const partyStompActive = this.partyActive || this.activePartyDiscoMusic;
+    if (!partyStompActive) {
+      this.clearPartyPresentation({ immediate: true, stopDisco: false, stopCheer: false });
+    }
+    if (!stompEvent?.triggered) {
+      if (partyStompActive) {
+        this.clearPartyPresentation({ immediate: true });
+      }
+      return;
+    }
     const crushedCells = Array.isArray(stompEvent.crushedCells) ? stompEvent.crushedCells : [];
     const bounds = this.getStompReelBounds(stompEvent.reels || []);
-    if (!bounds || !crushedCells.length) return;
+    if (!bounds || !crushedCells.length) {
+      if (partyStompActive) {
+        this.clearPartyPresentation({ immediate: true });
+      }
+      return;
+    }
 
     const cappedRoundTwa = this.clampToWinCap(roundTwa);
     const winCapReached = stompEvent.winCapReached === true
@@ -6393,6 +6554,7 @@ export class GameScene extends Phaser.Scene {
   clearGolfswingPresentation() {
     (this.golfswingObjects || []).forEach((item) => item?.destroy?.());
     this.golfswingObjects = [];
+    this.stopGolfswingAudio();
   }
 
   async restoreGolfswingBoardPresentation() {
@@ -6400,7 +6562,53 @@ export class GameScene extends Phaser.Scene {
       this.tweenPromise({ targets: this.background, alpha: 1, duration: 320, ease: "Quad.easeInOut" }),
       this.tweenPromise({ targets: this.reelFrame, alpha: 1, duration: 320, ease: "Quad.easeInOut" }),
       this.fadeMainGameSymbols(1, 320),
+      this.fadeInGolfswingHud(320),
     ]);
+  }
+
+  getGolfswingHudTargets() {
+    return [
+      this.countUpText,
+      this.angerLabel,
+      this.angerMeterCaption,
+      this.angerBonusBadge,
+      this.angerBonusSuperLabel,
+      ...(this.angerSegments || []),
+    ].filter(Boolean);
+  }
+
+  async fadeOutGolfswingHud(duration = 320) {
+    if (this.golfswingHudHidden) return;
+    const targets = this.getGolfswingHudTargets().filter((item) => item.visible && item.alpha > 0.01);
+    this.golfswingHudHidden = true;
+    if (!targets.length) return;
+    await this.tweenPromise({
+      targets,
+      alpha: 0,
+      duration,
+      ease: "Quad.easeInOut",
+      onComplete: () => targets.forEach((item) => item.setVisible(false)),
+    });
+  }
+
+  async fadeInGolfswingHud(duration = 320) {
+    if (!this.golfswingHudHidden) return;
+    this.golfswingHudHidden = false;
+
+    if (!this.isInBonusMode && !this.isPostBonusOuch) {
+      this.setAngerUiVisible(true);
+    }
+    this.syncCountUpDisplay(this.currentWin);
+
+    const targets = this.getGolfswingHudTargets().filter((item) => item.visible);
+    targets.forEach((item) => item.setAlpha(0));
+    if (!targets.length) return;
+    await this.tweenPromise({
+      targets,
+      alpha: 1,
+      duration,
+      ease: "Quad.easeInOut",
+    });
   }
 
   getGolfswingGrabSymbolPosition(handX, handY) {
@@ -6448,6 +6656,7 @@ export class GameScene extends Phaser.Scene {
     const grabY = target.y;
     const fast = this.fastForwardRequested;
 
+    this.playGolfFeatureStartMusic();
     await this.showCrushGiantBackground(fast ? 180 : 520);
     await this.waitForPresentation(
       fast ? 90 : Math.max(750, Number(event.teaseMs) || 700),
@@ -6462,6 +6671,7 @@ export class GameScene extends Phaser.Scene {
     const grabbedSymbol = this.reelSprites?.[reel]?.[row] || null;
     let syncGrabbedSymbol = () => {};
 
+    this.playGiantLaughSfx();
     await this.tweenPromise({
       targets: openHand,
       x: grabX,
@@ -6505,6 +6715,7 @@ export class GameScene extends Phaser.Scene {
       this.tweenPromise({ targets: this.reelFrame, alpha: 0, duration: fast ? 180 : 420, ease: "Quad.easeInOut" }),
       this.fadeMainGameSymbols(0, fast ? 180 : 420),
       this.tweenPromise({ targets: this.background, alpha: 0.12, duration: fast ? 180 : 420, ease: "Quad.easeInOut" }),
+      this.fadeOutGolfswingHud(fast ? 180 : 420),
     ]);
 
     const overlay = this.add.container(0, 0).setDepth(DEPTH.golfswingOverlay);
@@ -6691,6 +6902,8 @@ export class GameScene extends Phaser.Scene {
         new Phaser.Math.Vector2(passX, passY)
       );
 
+      let missSfxPlayed = false;
+      const crosshairT = 0.52;
       await this.tweenPromise({
         targets: travel,
         t: 1,
@@ -6699,7 +6912,11 @@ export class GameScene extends Phaser.Scene {
         onUpdate: () => {
           missCurve.getPoint(travel.t, point);
           projectileAnimal.setPosition(point.x, point.y);
-          const crosshairT = 0.52;
+          if (!missSfxPlayed && travel.t >= crosshairT) {
+            missSfxPlayed = true;
+            this.playGolfMissSfx();
+            this.stopGolfFeatureStartMusic();
+          }
           const scaleT = travel.t <= crosshairT
             ? (travel.t / crosshairT) ** 2 * 0.38
             : 0.38 + ((travel.t - crosshairT) / (1 - crosshairT)) ** 2.6 * 0.62;
@@ -6739,6 +6956,155 @@ export class GameScene extends Phaser.Scene {
       },
     });
     projectileAnimal.setPosition(impactX, impactY).setScale(approachPeakScale);
+    this.playGolfSwingSfx();
+    this.stopGolfFeatureStartMusic();
+    this.playGolfJackpotMusic();
+  }
+
+  getGolfJackpotMusicDurationMs() {
+    const audio = this.cache?.audio?.get?.("golf_jackpot_hit");
+    const durationSec = Number(audio?.duration);
+    if (Number.isFinite(durationSec) && durationSec > 0) {
+      return Math.round(durationSec * 1000);
+    }
+    return GOLF_JACKPOT_MUSIC_DURATION_MS;
+  }
+
+  getGolfJackpotMusicElapsedMs() {
+    const sound = this.activeGolfJackpotMusic;
+    if (sound?.isPlaying) {
+      const seekSec = Number(sound.seek);
+      if (Number.isFinite(seekSec) && seekSec >= 0) {
+        return Math.round(seekSec * 1000);
+      }
+    }
+    if (Number.isFinite(this.golfJackpotMusicStartedAt)) {
+      return Math.max(0, this.time.now - this.golfJackpotMusicStartedAt);
+    }
+    return 0;
+  }
+
+  getGolfJackpotMusicRemainingMs() {
+    return Math.max(
+      450,
+      this.getGolfJackpotMusicDurationMs() - this.getGolfJackpotMusicElapsedMs()
+    );
+  }
+
+  getGolfJackpotDrumStartMs() {
+    const musicDurationMs = this.getGolfJackpotMusicDurationMs();
+    const minTailMs = this.fastForwardRequested ? 280 : 900;
+    return Math.min(GOLF_JACKPOT_DRUM_START_MS, Math.max(0, musicDurationMs - minTailMs));
+  }
+
+  async spinGolfJackpotWheelToWin(wheel, finalRotation) {
+    if (!wheel?.active) return;
+
+    const fast = this.fastForwardRequested;
+    const musicDurationMs = this.getGolfJackpotMusicDurationMs();
+    const drumStartMs = this.getGolfJackpotDrumStartMs();
+    const elapsedMs = this.getGolfJackpotMusicElapsedMs();
+    const remainingMs = Math.max(fast ? 520 : 1200, musicDurationMs - elapsedMs);
+    const spinMs = Math.max(0, drumStartMs - elapsedMs);
+    const decelMs = Math.max(fast ? 260 : 500, remainingMs - spinMs);
+
+    const startRotation = wheel.rotation;
+    const totalDelta = finalRotation - startRotation;
+    const decelStartRotation = startRotation + totalDelta * GOLF_JACKPOT_WHEEL_CONSTANT_SPIN_ROTATION;
+
+    if (spinMs > 40) {
+      await this.tweenPromise({
+        targets: wheel,
+        rotation: decelStartRotation,
+        duration: spinMs,
+        ease: "Linear",
+      });
+    }
+
+    await this.tweenPromise({
+      targets: wheel,
+      rotation: finalRotation,
+      duration: decelMs,
+      ease: fast ? "Cubic.easeOut" : "Quart.easeOut",
+    });
+  }
+
+  spawnGolfswingHitConfetti(center = {}, radiusPx = 180, { count = 32 } = {}) {
+    const centerX = Number(center.x) || GAME_LOGICAL_WIDTH * 0.5;
+    const centerY = Number(center.y) || GAME_LOGICAL_HEIGHT * 0.45;
+    const spreadX = Math.max(90, radiusPx * 0.92);
+    const spreadY = Math.max(70, radiusPx * 0.58);
+    const confettiColors = [0xffd166, 0xff5d8f, 0x74d3ff, 0x8cff8c, 0xc084fc, 0xffffff];
+    const fast = this.fastForwardRequested;
+
+    for (let index = 0; index < count; index += 1) {
+      const startX = centerX + Phaser.Math.FloatBetween(-spreadX * 0.28, spreadX * 0.28);
+      const startY = centerY + Phaser.Math.FloatBetween(-spreadY * 0.12, spreadY * 0.2);
+      const tossX = startX + Phaser.Math.FloatBetween(-spreadX * 0.55, spreadX * 0.55);
+      const tossY = startY - Phaser.Math.Between(fast ? 110 : 190, fast ? 170 : 320);
+      const landX = tossX + Phaser.Math.FloatBetween(-95, 95);
+      const landY = startY + Phaser.Math.Between(spreadY * 0.75, spreadY * 1.45);
+      const confetti = this.add.rectangle(
+        startX,
+        startY,
+        Phaser.Math.Between(5, 9),
+        Phaser.Math.Between(9, 16),
+        confettiColors[index % confettiColors.length],
+        1
+      )
+        .setDepth(DEPTH.golfswingFx + 4)
+        .setAngle(Phaser.Math.Between(-40, 40))
+        .setAlpha(0);
+      this.golfswingObjects.push(confetti);
+
+      const delay = index * (fast ? 12 : 22);
+      const tossDuration = Phaser.Math.Between(fast ? 160 : 240, fast ? 240 : 360);
+      const fallDuration = Phaser.Math.Between(fast ? 900 : 1500, fast ? 1300 : 2400);
+      const spinAngle = confetti.angle + Phaser.Math.Between(220, 520);
+
+      this.tweens.add({
+        targets: confetti,
+        alpha: Phaser.Math.FloatBetween(0.86, 0.98),
+        duration: fast ? 90 : 130,
+        delay,
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          if (!confetti.active) return;
+          this.tweens.add({
+            targets: confetti,
+            x: tossX,
+            y: tossY,
+            angle: confetti.angle + Phaser.Math.Between(-70, 70),
+            duration: tossDuration,
+            ease: "Back.easeOut",
+            easeParams: [1.35],
+            onComplete: () => {
+              if (!confetti.active) return;
+              this.tweens.add({
+                targets: confetti,
+                x: landX,
+                y: landY,
+                angle: spinAngle,
+                alpha: 0,
+                duration: fallDuration,
+                ease: "Quad.easeIn",
+                onComplete: () => confetti.destroy(),
+              });
+            },
+          });
+        },
+      });
+    }
+  }
+
+  waitForGolfJackpotMusicFinish() {
+    const sound = this.activeGolfJackpotMusic;
+    if (!sound?.isPlaying) return Promise.resolve();
+    return new Promise((resolve) => {
+      const finish = () => resolve();
+      sound.once("complete", finish);
+      sound.once("stop", finish);
+    });
   }
 
   spawnGolfswingBloodSmear(fromX, fromY, toX, toY, {
@@ -7059,6 +7425,7 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(0);
     const sliceCount = segments.length;
     const sliceAngle = (Math.PI * 2) / sliceCount;
+    const sliceNodes = [];
 
     segments.forEach((label, index) => {
       const startAngle = index * sliceAngle - Math.PI / 2;
@@ -7087,6 +7454,14 @@ export class GameScene extends Phaser.Scene {
           strokeThickness: 3,
         }
       ).setOrigin(0.5);
+      sliceNodes.push({
+        arc,
+        text,
+        startAngle,
+        endAngle,
+        labelAngle,
+        segmentColor,
+      });
       wheel.add([arc, text]);
     });
     this.golfswingObjects.push(wheel);
@@ -7169,41 +7544,102 @@ export class GameScene extends Phaser.Scene {
     ]);
 
     const targetRotation = -(winIndex * sliceAngle + sliceAngle / 2);
-    const fullTurns = 4 + Math.floor(Math.random() * 2);
+    const fullTurns = 5 + Math.floor(Math.random() * 2);
     const finalRotation = targetRotation + fullTurns * Math.PI * 2;
 
     if (!fast) {
       await this.waitForPresentation(320, { skippable: true });
     }
 
-    const spinDuration = fast ? 900 : 5600;
+    const spinDuration = fast
+      ? 900
+      : Math.max(
+        2800,
+        this.getGolfJackpotMusicDurationMs() - this.getGolfJackpotMusicElapsedMs()
+      );
     const fadeLeadMs = fast ? 220 : 780;
     const fadeTimer = this.time.delayedCall(
       Math.max(0, spinDuration - fadeLeadMs),
       () => animalSlide?.fadeOut?.(fast ? 260 : 520)
     );
 
-    await this.tweenPromise({
-      targets: wheel,
-      rotation: finalRotation,
-      duration: spinDuration,
-      ease: fast ? "Cubic.easeOut" : "Quart.easeOut",
-    });
+    await this.spinGolfJackpotWheelToWin(wheel, finalRotation);
     fadeTimer.remove(false);
 
-    if (!fast) {
-      await this.tweenPromise({
-        targets: wheel,
-        scaleX: 1.04,
-        scaleY: 1.04,
-        duration: 180,
-        ease: "Sine.easeOut",
+    const winningSlice = sliceNodes[winIndex] || null;
+    await this.presentGolfJackpotWinHighlight(wheel, winningSlice, wheelRadius, pointer, pointerPin);
+    await this.waitForGolfJackpotMusicFinish();
+  }
+
+  async presentGolfJackpotWinHighlight(wheel, slice, wheelRadius, pointer, pointerPin) {
+    if (!wheel?.active || !slice) return;
+
+    const fast = this.fastForwardRequested;
+    const { startAngle, endAngle, text } = slice;
+    const glow = this.add.graphics();
+    glow.fillStyle(0xfff0a8, 0.58);
+    glow.lineStyle(5, 0xffffff, 0.96);
+    glow.beginPath();
+    glow.moveTo(0, 0);
+    glow.arc(0, 0, wheelRadius * 1.015, startAngle, endAngle, false);
+    glow.closePath();
+    glow.fillPath();
+    glow.strokePath();
+    wheel.add(glow);
+    wheel.bringToTop(text);
+
+    this.playGolfJackpotConfirmSfx();
+    this.cameras.main.shake(fast ? 90 : 150, 0.0065);
+
+    const textScaleX = text.scaleX;
+    const textScaleY = text.scaleY;
+    await Promise.all([
+      this.tweenPromise({
+        targets: glow,
+        alpha: 0.95,
+        duration: fast ? 130 : 240,
         yoyo: true,
-      });
-      await this.waitForPresentation(820, { skippable: true });
-    } else {
-      await this.waitForPresentation(200, { skippable: true });
-    }
+        repeat: fast ? 1 : 2,
+        ease: "Sine.easeInOut",
+      }),
+      this.tweenPromise({
+        targets: text,
+        scaleX: textScaleX * 1.24,
+        scaleY: textScaleY * 1.24,
+        duration: fast ? 150 : 280,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }),
+      this.tweenPromise({
+        targets: wheel,
+        scaleX: 1.05,
+        scaleY: 1.05,
+        duration: fast ? 120 : 200,
+        yoyo: true,
+        ease: "Sine.easeOut",
+      }),
+      pointer ? this.tweenPromise({
+        targets: pointer,
+        scaleX: 1.16,
+        scaleY: 1.16,
+        duration: fast ? 120 : 200,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }) : Promise.resolve(),
+      pointerPin ? this.tweenPromise({
+        targets: pointerPin,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        duration: fast ? 120 : 200,
+        yoyo: true,
+        ease: "Back.easeOut",
+      }) : Promise.resolve(),
+    ]);
+
+    await this.waitForPresentation(
+      fast ? 240 : GOLF_JACKPOT_WIN_HIGHLIGHT_MS,
+      { skippable: true }
+    );
   }
 
   async presentGolfswingFeature(event = {}) {
@@ -7231,6 +7667,7 @@ export class GameScene extends Phaser.Scene {
 
       if (event.hit) {
         const isSuperGolfswing = event.isSuperGolfswing === true;
+        this.spawnGolfswingHitConfetti(aimResult.zoneCenter, aimResult.zoneRadiusPx);
         await this.presentGolfswingAnimalSplatterImpact(
           sceneResult?.projectileAnimal,
           aimResult.endPos.x,
@@ -7276,6 +7713,9 @@ export class GameScene extends Phaser.Scene {
     } catch (error) {
       console.error("Golf swing presentation failed:", error);
     } finally {
+      if (this.golfswingHudHidden) {
+        await this.fadeInGolfswingHud(this.fastForwardRequested ? 120 : 280);
+      }
       await this.dismissUnicornRainbowCloud();
       this.clearGolfswingPresentation();
     }
@@ -8056,11 +8496,54 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
   }
 
+  cancelDeferredWinDisplayClearTimer() {
+    this.deferredWinClearTimer?.remove(false);
+    this.deferredWinClearTimer = null;
+  }
+
+  cancelDeferredWinDisplayClear() {
+    this.cancelDeferredWinDisplayClearTimer();
+    this.deferWinDisplayClear = false;
+  }
+
+  getWinDisplayClearAtMidSpinMs() {
+    return flowInteractionPolicy.winDisplayClearAtMidSpinMs ?? 520;
+  }
+
+  hasVisibleWinDisplay() {
+    return this.currentWin > 0.005
+      || (this.countUpText?.visible && this.countUpText.alpha > 0.01);
+  }
+
+  scheduleDeferredWinDisplayClear() {
+    this.cancelDeferredWinDisplayClear();
+    if (!this.hasVisibleWinDisplay()) {
+      this.currentWin = 0;
+      this.resetCountUpPresentation();
+      this.syncCountUpDisplay(0);
+      return;
+    }
+    this.deferWinDisplayClear = true;
+    this.deferredWinClearTimer = this.time.delayedCall(
+      this.getWinDisplayClearAtMidSpinMs(),
+      () => this.finishDeferredWinDisplayClear()
+    );
+  }
+
+  finishDeferredWinDisplayClear() {
+    if (!this.deferWinDisplayClear) return;
+    this.deferWinDisplayClear = false;
+    this.cancelDeferredWinDisplayClearTimer();
+    this.currentWin = 0;
+    this.resetCountUpPresentation();
+    this.syncCountUpDisplay(0);
+  }
+
   getMainCountUpDuration(targetValue = 0, currentValue = this.currentWin) {
     const target = Math.max(0, Number(targetValue) || 0);
     const current = Math.max(0, Number(currentValue) || 0);
     const delta = Math.max(0, target - current);
-    return Phaser.Math.Clamp(80 + delta * 18, 80, 180);
+    return Phaser.Math.Clamp(50 + delta * 10, 50, 110);
   }
 
   async updateCountUp(targetValue = 0, { duration = 420, fast = false, skipStompCoinCollect = false } = {}) {
@@ -8111,11 +8594,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   resetForNewSpin() {
-    this.currentWin = 0;
     this.stompWinCapHandled = false;
-    this.resetCountUpPresentation();
-    this.syncCountUpDisplay(0);
+    this.scheduleDeferredWinDisplayClear();
     this.clearStompLandedCoins();
+    this.clearPartyStompScratchTimer();
+    this.clearPartyStompMainThemeTimer();
+    this.mainThemeSuppressedAfterPartyStomp = false;
+    if (!this.isInBonusMode && !this.isPostBonusOuch) {
+      this.startMainTheme();
+    }
     this.clearPartyPresentation({ immediate: true });
     this.clearGolfswingPresentation();
     this.clearPendingFastForward();
@@ -8149,12 +8636,14 @@ export class GameScene extends Phaser.Scene {
 
   async enterBonus(gameState = {}) {
     this.clearHighlights();
+    this.clearPartyStompMainThemeTimer();
     this.clearPartyPresentation({ immediate: true });
     this.isInBonusMode = true;
     this.damageMeterIntroComplete = false;
     this.setAngerUiVisible(false);
     this.totalWinBackground?.setAlpha(0);
     this.reelFrame?.setAlpha(1);
+    this.cancelDeferredWinDisplayClear();
     this.resetCountUpPresentation();
     this.setBonusUiVisible(false);
     this.hideFreespinCounter();
@@ -8214,6 +8703,7 @@ export class GameScene extends Phaser.Scene {
     ]);
     this.resetAngerMeter();
     this.setAngerUiVisible(true);
+    this.cancelDeferredWinDisplayClear();
     this.resetCountUpPresentation();
     this.syncCountUpDisplay(this.currentWin);
   }
@@ -8307,6 +8797,9 @@ export class GameScene extends Phaser.Scene {
 
   requestFastForward() {
     this.fastForwardRequested = true;
+    if (this.deferWinDisplayClear) {
+      this.finishDeferredWinDisplayClear();
+    }
     const fastForwardScale = 5 * this.getMainGameSpeedMultiplier();
     this.time.timeScale = fastForwardScale;
     this.tweens.timeScale = fastForwardScale;
@@ -8337,6 +8830,15 @@ export class GameScene extends Phaser.Scene {
 
   playGiantLaughSfx() {
     this.playSfx("giant_laugh", { volume: 0.68 });
+  }
+
+  playUnicornAppearSfxIfNeeded(symbol) {
+    if (Number(symbol) !== UNICORN_SYMBOL) return;
+    this.playUnicornAppearSfx();
+  }
+
+  playUnicornAppearSfx() {
+    this.playSfx("unicorn_appear", { volume: 0.76 });
   }
 
   stopOuchLaughSfx() {
@@ -8395,6 +8897,214 @@ export class GameScene extends Phaser.Scene {
     sound.destroy();
   }
 
+  playPartyDiscoMusic() {
+    this.stopPartyDiscoMusic();
+    if (!this.sound || !this.cache.audio.exists("party_disco")) return;
+    if (this.musicMuted) return;
+
+    this.mainTheme?.stop();
+    const sound = this.sound.add("party_disco", {
+      loop: true,
+      volume: 0.62 * (this.fastForwardRequested ? 0.55 : 1),
+    });
+    this.activePartyDiscoMusic = sound;
+    const release = () => {
+      if (this.activePartyDiscoMusic === sound) {
+        this.activePartyDiscoMusic = null;
+      }
+      sound.destroy();
+      this.restoreMainThemeAfterPartyDisco();
+    };
+    sound.once("stop", release);
+    if (!sound.play({ seek: PARTY_DISCO_START_SEEK_SEC })) release();
+  }
+
+  stopPartyDiscoMusic({ restoreMainTheme = true } = {}) {
+    const sound = this.activePartyDiscoMusic;
+    if (!sound) return;
+    this.activePartyDiscoMusic = null;
+    sound.stop();
+    sound.destroy();
+    if (restoreMainTheme) {
+      this.restoreMainThemeAfterPartyDisco();
+    }
+  }
+
+  restoreMainThemeAfterPartyDisco() {
+    if (this.mainThemeSuppressedAfterPartyStomp || this.isInBonusMode || this.isPostBonusOuch) return;
+    this.startMainTheme();
+  }
+
+  clearPartyStompScratchTimer() {
+    this.partyStompScratchTimer?.remove?.(false);
+    this.partyStompScratchTimer = null;
+  }
+
+  clearPartyStompMainThemeTimer() {
+    this.partyStompMainThemeTimer?.remove?.(false);
+    this.partyStompMainThemeTimer = null;
+    this.partyStompMainThemeFadeTween?.stop?.();
+    this.partyStompMainThemeFadeTween = null;
+  }
+
+  schedulePartyStompMainThemeFadeIn() {
+    this.clearPartyStompMainThemeTimer();
+    const delayMs = this.fastForwardRequested
+      ? Math.max(800, Math.round(PARTY_STOMP_MAIN_THEME_FADE_IN_DELAY_MS * 0.4))
+      : PARTY_STOMP_MAIN_THEME_FADE_IN_DELAY_MS;
+    this.partyStompMainThemeTimer = this.time.delayedCall(delayMs, () => {
+      this.partyStompMainThemeTimer = null;
+      this.fadeInMainThemeAfterPartyStomp();
+    });
+  }
+
+  fadeInMainThemeAfterPartyStomp() {
+    this.mainThemeSuppressedAfterPartyStomp = false;
+    if (this.musicMuted || this.isInBonusMode || this.isPostBonusOuch) return;
+
+    if (this.mainTheme?.isPlaying) {
+      this.mainTheme.setVolume(0);
+    } else {
+      this.mainTheme?.stop();
+      this.mainTheme = this.sound.add("theme_main", { loop: true, volume: 0 });
+      if (!this.mainTheme.play()) return;
+    }
+
+    const targetVolume = 0.5;
+    const counter = { v: 0 };
+    this.partyStompMainThemeFadeTween?.stop?.();
+    this.partyStompMainThemeFadeTween = this.tweens.add({
+      targets: counter,
+      v: targetVolume,
+      duration: this.fastForwardRequested ? 450 : PARTY_STOMP_MAIN_THEME_FADE_MS,
+      ease: "Quad.easeInOut",
+      onUpdate: () => this.mainTheme?.setVolume(counter.v),
+      onComplete: () => {
+        this.partyStompMainThemeFadeTween = null;
+      },
+    });
+  }
+
+  schedulePartyStompScratch() {
+    this.clearPartyStompScratchTimer();
+    if (!this.partyActive && !this.activePartyDiscoMusic) return;
+
+    const delayMs = this.fastForwardRequested
+      ? Math.max(60, Math.round(PARTY_STOMP_SCRATCH_DELAY_MS * 0.4))
+      : PARTY_STOMP_SCRATCH_DELAY_MS;
+    this.partyStompScratchTimer = this.time.delayedCall(delayMs, () => {
+      this.partyStompScratchTimer = null;
+      this.playPartyStompScratch();
+    });
+  }
+
+  playPartyStompScratch() {
+    if (!this.partyActive && !this.activePartyDiscoMusic) return;
+    this.stopPartyAnimalCheer({ immediate: true });
+    this.mainThemeSuppressedAfterPartyStomp = true;
+    this.clearPartyAtmosphere({ immediate: true });
+    this.clearTotalWinCelebration();
+    this.stopPartyDiscoMusic({ restoreMainTheme: false });
+    this.playSfx("party_scratch", { volume: 0.88 });
+    this.schedulePartyStompMainThemeFadeIn();
+  }
+
+  playGolfFeatureStartMusic() {
+    this.stopGolfFeatureStartMusic();
+    if (!this.sound || !this.cache.audio.exists("golf_feature_start")) return;
+    if (this.musicMuted) return;
+
+    this.mainTheme?.stop();
+    const sound = this.sound.add("golf_feature_start", {
+      loop: true,
+      volume: 0.58 * (this.fastForwardRequested ? 0.55 : 1),
+    });
+    this.activeGolfFeatureMusic = sound;
+    const release = () => {
+      if (this.activeGolfFeatureMusic === sound) {
+        this.activeGolfFeatureMusic = null;
+      }
+      sound.destroy();
+      this.restoreMainThemeAfterGolfAudio();
+    };
+    sound.once("stop", release);
+    if (!sound.play()) release();
+  }
+
+  stopGolfFeatureStartMusic() {
+    const sound = this.activeGolfFeatureMusic;
+    if (!sound) return;
+    this.activeGolfFeatureMusic = null;
+    sound.stop();
+    sound.destroy();
+    this.restoreMainThemeAfterGolfAudio();
+  }
+
+  playGolfSwingSfx() {
+    this.playSfx("golf_swing", { volume: 0.82 });
+  }
+
+  playGolfMissSfx() {
+    this.playSfx("golf_miss", { volume: 0.84 });
+  }
+
+  playGolfJackpotConfirmSfx() {
+    this.playSfx("wins_highlight", { volume: 0.62 });
+    this.time.delayedCall(70, () => {
+      this.playSfx("wins_payout", { volume: 0.72 });
+    });
+  }
+
+  playGolfJackpotMusic() {
+    this.stopGolfJackpotMusic();
+    if (!this.sound || !this.cache.audio.exists("golf_jackpot_hit")) return;
+    if (this.musicMuted) return;
+
+    const sound = this.sound.add("golf_jackpot_hit", {
+      volume: 0.66 * (this.fastForwardRequested ? 0.55 : 1),
+    });
+    this.activeGolfJackpotMusic = sound;
+    this.golfJackpotMusicStartedAt = this.time.now;
+    const release = () => {
+      if (this.activeGolfJackpotMusic === sound) {
+        this.activeGolfJackpotMusic = null;
+      }
+      this.golfJackpotMusicStartedAt = null;
+      sound.destroy();
+      this.restoreMainThemeAfterGolfAudio();
+    };
+    sound.once("stop", release);
+    sound.once("complete", release);
+    if (!sound.play()) release();
+  }
+
+  stopGolfJackpotMusic() {
+    const sound = this.activeGolfJackpotMusic;
+    if (!sound) return;
+    this.activeGolfJackpotMusic = null;
+    this.golfJackpotMusicStartedAt = null;
+    sound.stop();
+    sound.destroy();
+    this.restoreMainThemeAfterGolfAudio();
+  }
+
+  stopGolfswingAudio() {
+    this.stopGolfFeatureStartMusic();
+    this.stopGolfJackpotMusic();
+  }
+
+  restoreMainThemeAfterGolfAudio() {
+    if (
+      this.activeGolfFeatureMusic
+      || this.activeGolfJackpotMusic
+      || this.isInBonusMode
+      || this.isPostBonusOuch
+    ) {
+      return;
+    }
+    this.startMainTheme();
+  }
+
   playOuchStompSfx(volume = 0.82) {
     this.playSfx(OUCH_STOMP_SFX[0], { volume });
     this.time?.delayedCall(60, () => {
@@ -8434,7 +9144,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   startMainTheme() {
-    if (this.musicMuted || this.isInBonusMode || this.mainTheme?.isPlaying) return;
+    if (
+      this.musicMuted
+      || this.isInBonusMode
+      || this.isPostBonusOuch
+      || this.mainThemeSuppressedAfterPartyStomp
+    ) return;
+    if (this.mainTheme?.isPlaying) return;
     this.mainTheme = this.sound.add("theme_main", { loop: true, volume: 0.5 });
     this.mainTheme.play();
   }
@@ -8475,7 +9191,14 @@ export class GameScene extends Phaser.Scene {
 
   toggleMusic() {
     this.musicMuted = !this.musicMuted;
-    [this.mainTheme, this.bonusTheme, this.ouchTheme].forEach((theme) => theme?.setMute(this.musicMuted));
+    [
+      this.mainTheme,
+      this.bonusTheme,
+      this.ouchTheme,
+      this.activePartyDiscoMusic,
+      this.activeGolfFeatureMusic,
+      this.activeGolfJackpotMusic,
+    ].forEach((theme) => theme?.setMute(this.musicMuted));
     return this.musicMuted;
   }
 

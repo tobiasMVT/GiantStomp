@@ -11,6 +11,7 @@ description: Rainbow unicorn wild (symbol 14) and guaranteed 4-life superbonus e
 - Weight is **0** in `symbolWeights`; appears via random injection on paid spins, party boards, or dev ticket boards.
 - Acts as a **wild** in `evaluateWays` — substitutes for paying symbols 1–10.
 - Asset: `src/game-client/assets/giantstomp/unicorn_trans.png` (board + 4th life sigil).
+- Client plays `unicorn_appear` (`giant-video-game-character-dialogue-vocalization-i-can-smell-you.mp3`) whenever symbol 14 lands on the board, independent of bonus or feature outcomes.
 
 ## Entry
 

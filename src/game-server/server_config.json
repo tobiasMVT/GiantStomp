@@ -8,7 +8,7 @@
       { "strategyId": "bonusEntry", "label": "Bonus", "cost": 84 },
       { "strategyId": "partyEntry", "label": "Party", "cost": 29 },
       { "strategyId": "superBonusEntry", "label": "Super Bonus", "cost": 166 },
-      { "strategyId": "golfswingEntry", "label": "Golf Swing", "cost": 10 },
+      { "strategyId": "golfswingEntry", "label": "Golf Swing", "cost": 7 },
       { "strategyId": "superGolfswingEntry", "label": "Super Golf Swing", "cost": 70 }
     ]
   },

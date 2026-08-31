@@ -47,4 +47,7 @@ Dev entry:
 - `buildSegmentFlow.js` slides old symbols out first, then runs `startPartyCelebration` before the staggered drop.
 - Confetti spawns above the grid, drifts down slowly, and fades out near the bottom (fewer pieces than total-win confetti).
 - Party drops land **reel-by-reel** with a short gap between each column.
-- Confetti and party FX clear when stomp/crush starts, the next spin begins, or bonus intro starts.
+- After animals land, each celebrating symbol starts its hop/wiggle dance as soon as it lands; the reel-by-reel drop staggers when each column joins the disco.
+- Confetti and party FX clear when the party stomp scratch plays, crush starts, the next spin begins, or bonus intro starts.
+- `animaldisco.mp3` (`party_disco`) starts at **13s** when party triggers; main theme pauses for the disco loop.
+- During a party stomp, the stomp SFX plays at impact, then ~220ms later `scratch.mp3` (`party_scratch`) ends the disco visuals and music. Giant laugh plays in the brief silence; main theme fades back in ~3s after the scratch (unless bonus intro starts first).

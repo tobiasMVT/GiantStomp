@@ -62,6 +62,18 @@ const soundInteractionPolicy = {
   },
   ouch_celebration_cheer: {
     allowDuringFastForward: false
+  },
+  party_scratch: {
+    allowDuringFastForward: false
+  },
+  golf_swing: {
+    allowDuringFastForward: false
+  },
+  golf_miss: {
+    allowDuringFastForward: false
+  },
+  unicorn_appear: {
+    allowDuringFastForward: false
   }
 };
 

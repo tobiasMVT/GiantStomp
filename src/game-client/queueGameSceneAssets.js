@@ -123,4 +123,14 @@ export function queueGameSceneAssets(load, _deps = {}) {
     "ouch_celebration_cheer",
     "assets/giantstomp/sounds/happy-animals-crowds-groups-sound-like-trumpeting-cheering-and-celebrating.mp3"
   );
+  load.audio("party_disco", "assets/giantstomp/sounds/animaldisco.mp3");
+  load.audio("party_scratch", "assets/giantstomp/sounds/scratch.mp3");
+  load.audio("golf_feature_start", "assets/giantstomp/sounds/golf_feature_starts.mp3");
+  load.audio("golf_swing", "assets/giantstomp/sounds/swing.mp3");
+  load.audio("golf_miss", "assets/giantstomp/sounds/giant_missing_in_golf.mp3");
+  load.audio("golf_jackpot_hit", "assets/giantstomp/sounds/giant_hit_jackpot.mp3");
+  load.audio(
+    "unicorn_appear",
+    "assets/giantstomp/sounds/giant-video-game-character-dialogue-vocalization-i-can-smell-you.mp3"
+  );
 }

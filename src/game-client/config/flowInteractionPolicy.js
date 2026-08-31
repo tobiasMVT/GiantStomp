@@ -12,8 +12,37 @@ const flowInteractionPolicy = {
   // Use 0 if checkpoint clearing is enough for your current UX.
   fastForwardCooldownMs: 0,
 
-  // Hold after main-game win countup finishes before round can end (ms).
-  mainWinHoldAfterCountUpMs: 500,
+  // Brief beat after small wins (below one bet) before round can end (ms).
+  mainWinHoldAfterCountUpMs: 160,
+
+  // Hold when win >= betSize so the payout can be read (ms).
+  significantWinHoldAfterCountUpMs: 900,
+
+  // Feature bumps on small wins (ms).
+  featureWinHoldAfterCountUpMs: {
+    stomp: 220,
+    crush: 200,
+    party: 200,
+    golfswing: 260,
+  },
+
+  // Feature bumps when win >= betSize (ms).
+  significantFeatureWinHoldAfterCountUpMs: {
+    stomp: 1100,
+    crush: 1000,
+    party: 950,
+    golfswing: 1200,
+  },
+
+  // Hold after golf jackpot is added to the win counter (ms).
+  golfJackpotWinHoldAfterCountUpMs: 220,
+  significantGolfJackpotWinHoldAfterCountUpMs: 1100,
+
+  // Keep the previous win amount visible this long into the next spin before clearing (ms).
+  winDisplayClearAtMidSpinMs: 480,
+
+  // Short settle after reels land before feature / win presentation (ms).
+  postDropSettleMs: 50,
 
   // Pause on bonus dead spins so the empty board reads before the next freespin (ms).
   bonusDeadSpinHoldMs: 550,

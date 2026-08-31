@@ -54,7 +54,7 @@ Dev entry:
 
 - Ticket strategy `golfswingEntry` — forces golf swing with animal pick.
 - Ticket strategy `superGolfswingEntry` — forces golf swing with unicorn pick + super jackpot.
-- **Bet+ feature buy:** `Golf Swing` cost `10`; `Super Golf Swing` cost `70` (~94.5% RTP vs super jackpot EV).
+- **Bet+ feature buy:** `Golf Swing` cost `7`; `Super Golf Swing` cost `70` (both ~94.5% RTP vs their jackpot EV: 50% hit × weighted segment average).
 - `isTicketMatch` validates via `hasGolfswing` / `hasSuperGolfswing`.
 
 ## Client
@@ -73,6 +73,20 @@ Presentation (`GameScene.js`):
 4. **Bat swing:** animal always arcs toward the crosshair landing point; on hit it splats there, on miss it **flies through the crosshair, rushes past the camera**, then is destroyed off screen.
 5. **On hit:** animal splats at impact (blood for animals; super unicorn vanishes into a rainbow cloud on screen contact only). Super golf skips blood slide trails. Cloud dismisses when presentation ends.
 6. **On miss:** one continuous shot through the crosshair and past the camera; animal is destroyed only after exiting below screen; `MISS` label, win 0.
-7. Board fades back in; cleanup via `clearGolfswingPresentation`.
+7. Win amount + anger meter fade out when the golf scene starts and fade back in when it ends.
+8. Board fades back in; cleanup via `clearGolfswingPresentation`.
 
 All RNG is server-side; client only animates predetermined outcomes.
+
+## Audio
+
+| Asset key | File | When |
+|---|---|---|
+| `golf_feature_start` | `golf_feature_starts.mp3` | Giant appears at grab start; loops until hit/miss |
+| `giant_laugh` | `laugh.mp3` | Hand reaches to grab the picked animal |
+| `golf_swing` | `swing.mp3` | Animal impact on hit |
+| `golf_miss` | `giant_missing_in_golf.mp3` | Ball passes crosshair on miss |
+| `golf_jackpot_hit` | `giant_hit_jackpot.mp3` | Hit impact through jackpot wheel end (full clip) |
+| `wins_highlight` / `wins_payout` | existing win SFX | Jackpot confirm hit when wheel lands (via `playGolfJackpotConfirmSfx`) |
+
+Jackpot wheel spin: constant-speed spin until the drums enter at **5.0s**, then one deceleration curve through the remaining sting so the pointer lands on the winning slice when `golf_jackpot_hit` ends. On land: `playGolfJackpotConfirmSfx()` fires `wins_highlight` + `wins_payout`, golden slice glow, and label pulse on the winning segment.

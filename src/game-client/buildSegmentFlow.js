@@ -3,6 +3,47 @@ import flowInteractionPolicy from "./config/flowInteractionPolicy.js";
 const FULL_DROP_ACTIONS = new Set(["spin", "freespin"]);
 const CASCADE_ACTIONS = new Set(["respin", "freerespin"]);
 
+function isSignificantWin(winAmount, betSize) {
+  const bet = Math.max(0, Number(betSize) || 0);
+  const win = Math.max(0, Number(winAmount) || 0);
+  return bet > 0 && win >= bet;
+}
+
+function resolveMainWinHoldMs(gameState, policy, winAmount = 0) {
+  const significant = isSignificantWin(winAmount, gameState.betSize);
+  const base = significant
+    ? (policy.significantWinHoldAfterCountUpMs ?? 900)
+    : (policy.mainWinHoldAfterCountUpMs ?? 0);
+  const featureHolds = significant
+    ? (policy.significantFeatureWinHoldAfterCountUpMs || {})
+    : (policy.featureWinHoldAfterCountUpMs || {});
+  if (gameState.golfswingEvent?.triggered) {
+    return Math.max(base, featureHolds.golfswing ?? base);
+  }
+  if (gameState.stompEvent?.triggered) {
+    return Math.max(base, featureHolds.stomp ?? base);
+  }
+  if (gameState.crushEvent?.triggered) {
+    return Math.max(base, featureHolds.crush ?? base);
+  }
+  if (gameState.partyEvent?.triggered) {
+    return Math.max(base, featureHolds.party ?? base);
+  }
+  return base;
+}
+
+function resolveGolfJackpotWinHoldMs(gameState, policy, winAmount = 0) {
+  const significant = isSignificantWin(winAmount, gameState.betSize);
+  if (significant) {
+    return policy.significantGolfJackpotWinHoldAfterCountUpMs
+      ?? policy.significantWinHoldAfterCountUpMs
+      ?? 900;
+  }
+  return policy.golfJackpotWinHoldAfterCountUpMs
+    ?? policy.mainWinHoldAfterCountUpMs
+    ?? 0;
+}
+
 export function buildSegmentFlow({
   gameState,
   scene,
@@ -40,10 +81,18 @@ export function buildSegmentFlow({
     skipVisual();
     syncBonusUi();
   };
-  const mainWinHoldMs = flowInteractionPolicy.mainWinHoldAfterCountUpMs ?? 0;
+  const mainWinHoldMs = resolveMainWinHoldMs(gameState, flowInteractionPolicy, mainTwa);
   const shouldHoldMainWin = !isBonusCashSpin
     && mainTwa > 0
     && mainWinHoldMs > 0;
+  const golfJackpotHoldMs = resolveGolfJackpotWinHoldMs(
+    gameState,
+    flowInteractionPolicy,
+    gameState.twa || 0
+  );
+  const shouldHoldGolfJackpotWin = hasGolfswing
+    && golfJackpotWin > 0
+    && golfJackpotHoldMs > 0;
 
   return [
     {
@@ -83,7 +132,7 @@ export function buildSegmentFlow({
     {
       checkpoint: false,
       enabled: true,
-      run: () => waitCancellable?.(120),
+      run: () => waitCancellable?.(flowInteractionPolicy.postDropSettleMs ?? 50),
       onSkipAction: () => cancelActiveDelay?.(),
     },
     {
@@ -136,18 +185,23 @@ export function buildSegmentFlow({
       run: async () => scene.emitOutcomeRevealed?.(),
     },
     {
-      checkpoint: false,
-      enabled: hasWins,
-      run: () => scene.highlightWins(gameState),
-      onSkipAction: () => scene.skipHighlightPhase?.(),
-    },
-    {
       checkpoint: true,
       enabled: !isBonusCashSpin,
-      run: () => scene.updateCountUp(mainTwa, {
-        fast: true,
-        duration: scene.getMainCountUpDuration?.(mainTwa) ?? 140,
-      }),
+      run: async () => {
+        const countUpPromise = scene.updateCountUp(mainTwa, {
+          fast: true,
+          duration: scene.getMainCountUpDuration?.(mainTwa) ?? 100,
+        });
+        if (hasWins) {
+          await Promise.all([
+            scene.highlightWins(gameState),
+            countUpPromise,
+          ]);
+          return;
+        }
+        await countUpPromise;
+      },
+      onSkipAction: () => scene.skipHighlightPhase?.(),
     },
     {
       checkpoint: false,
@@ -169,6 +223,12 @@ export function buildSegmentFlow({
         duration: scene.getMainCountUpDuration?.(gameState.twa || 0, mainTwa) ?? 140,
         skipStompCoinCollect: true,
       }),
+    },
+    {
+      checkpoint: false,
+      enabled: shouldHoldGolfJackpotWin,
+      run: () => waitCancellable?.(golfJackpotHoldMs),
+      onSkipAction: () => cancelActiveDelay?.(),
     },
   ];
 }
