@@ -15,6 +15,12 @@ export function formatRulesMultiplier(value) {
   return `${Number(number.toFixed(2)).toString()}x`;
 }
 
+function formatPercent(value, fallback = "0%") {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return `${(Math.max(0, Math.min(1, number)) * 100).toFixed(2).replace(/\.00$/, "")}%`;
+}
+
 function formatRange(values, fallback) {
   const numbers = Object.keys(values || {})
     .map(Number)
@@ -33,6 +39,17 @@ function formatSimulationNumber(value) {
   return Number.isFinite(number) ? number.toLocaleString("en-US") : "Unavailable";
 }
 
+function frequencyToRate(frequency) {
+  const denominator = Number(String(frequency || "").match(/^1\/([\d.]+)/)?.[1]);
+  return Number.isFinite(denominator) && denominator > 0 ? 1 / denominator : null;
+}
+
+function formatFrequencyRate(rate, { approximate = false } = {}) {
+  if (!Number.isFinite(rate) || rate <= 0) return "Unavailable";
+  const prefix = approximate ? "~" : "";
+  return `${prefix}1/${(1 / rate).toFixed(2)} (${(rate * 100).toFixed(2)}%)`;
+}
+
 function buildSimulationStatistics() {
   const rounds = readSimulationMatch(/^Rounds completed:\s*([\d,]+)/m);
   const rtp = readSimulationMatch(/^RTP:\s*([\d.]+%)/m);
@@ -42,33 +59,74 @@ function buildSimulationStatistics() {
   const bonusRtp = readSimulationMatch(/^Bonus RTP:\s*([\d.]+%)/m);
   const trapPower = readSimulationMatch(/^Avg trap power:\s*([\d.]+)/m);
   const finalMultiplier = readSimulationMatch(/^Avg final mult:\s*([\d.]+x)/m);
-  const golfHitRate = readSimulationMatch(/^Golfswing:.*?,\s*([\d.]+% hit)\)/m);
+  const golfHitRate = readSimulationMatch(/^(?:Golfswing|Golfswing \(all\)):.*?,\s*([\d.]+% hit)\)/m);
   const mainVariance = readSimulationMatch(/^Main var\/std:\s*([\d.]+)/m);
   const mainStdDev = readSimulationMatch(/^Main var\/std:\s*[\d.]+\s*\/\s*([\d.]+)/m);
   const bonusVariance = readSimulationMatch(/^Bonus var\/std:\s*([\d.]+)/m);
   const bonusStdDev = readSimulationMatch(/^Bonus var\/std:\s*[\d.]+\s*\/\s*([\d.]+)/m);
+  const stompFrequency = readSimulationMatch(/^Stomp feature:\s*(1\/[\d.]+)/m);
+  const crushFrequency = readSimulationMatch(/^Crush feature:\s*(1\/[\d.]+)/m);
+  const partyFrequency = readSimulationMatch(/^Party feature:\s*(1\/[\d.]+)/m);
+  const golfFrequency = readSimulationMatch(/^(?:Golfswing|Golfswing \(all\)):\s*(1\/[\d.]+)/m);
+  const normalGolfFrequency = readSimulationMatch(/^Normal golfswing:\s*(1\/[\d.]+)/m);
+  const superGolfFrequency = readSimulationMatch(/^Super golfswing:\s*(1\/[\d.]+)/m);
+  const anyFeatureFrequency = readSimulationMatch(/^Any feature:\s*(1\/[\d.]+)/m);
+  const regularBonusFrequency = readSimulationMatch(/^Regular bonus:\s*(1\/[\d.]+)/m);
+  const superBonusFrequency = readSimulationMatch(/^Superbonus:\s*(1\/[\d.]+)/m);
+  const unicornFrequency = readSimulationMatch(/^Unicorn on board:\s*(1\/[\d.]+)/m);
+  const baseFeatureRate = [stompFrequency, crushFrequency, partyFrequency, golfFrequency]
+    .map(frequencyToRate)
+    .filter(Number.isFinite)
+    .reduce((total, rate) => total + rate, 0);
 
   const hitRatePercent = Number(hitRate);
   return {
     rounds: formatSimulationNumber(rounds),
     cards: [
-      { label: "RTP", value: rtp || "Unavailable", detail: "Return to player" },
+      { group: "Main Statistics", label: "RTP", value: rtp || "Unavailable", detail: "Return to player" },
       {
+        group: "Main Statistics",
         label: "Hit Rate",
         value: Number.isFinite(hitRatePercent) ? `${(hitRatePercent * 100).toFixed(2)}%` : "Unavailable",
         detail: "Winning paid rounds",
       },
-      { label: "Bonus Frequency", value: bonusFrequency || "Unavailable", detail: "Regular + Super Bonus" },
-      { label: "Rounds Simulated", value: formatSimulationNumber(rounds), detail: "Completed normal rounds" },
-      { label: "Main Game RTP", value: mainGameRtp || "Unavailable", detail: "Paid spin phase" },
-      { label: "Bonus RTP", value: bonusRtp || "Unavailable", detail: "Bonus feature phase" },
-      { label: "Main Variance", value: mainVariance || "Unavailable", detail: "Main-game win spread" },
-      { label: "Main Std. Deviation", value: mainStdDev || "Unavailable", detail: "Main-game volatility" },
-      { label: "Bonus Variance", value: bonusVariance || "Unavailable", detail: "Bonus win spread" },
-      { label: "Bonus Std. Deviation", value: bonusStdDev || "Unavailable", detail: "Bonus volatility" },
-      { label: "Avg Trap Power", value: trapPower ? formatRulesMultiplier(trapPower) : "Unavailable", detail: "Per completed bonus" },
-      { label: "Avg Final Multiplier", value: finalMultiplier || "Unavailable", detail: "Ouch Stomp result" },
-      { label: "Golf Swing Hit Rate", value: golfHitRate || "Unavailable", detail: "Per triggered Golf Swing" },
+      { group: "Main Statistics", label: "Rounds Simulated", value: formatSimulationNumber(rounds), detail: "Completed normal rounds" },
+      { group: "Main Statistics", label: "Main Game RTP", value: mainGameRtp || "Unavailable", detail: "Paid spin phase" },
+      { group: "Main Statistics", label: "Bonus RTP", value: bonusRtp || "Unavailable", detail: "Bonus feature phase" },
+      { group: "Main Statistics", label: "Main Variance", value: mainVariance || "Unavailable", detail: "Main-game win spread" },
+      { group: "Main Statistics", label: "Main Std. Deviation", value: mainStdDev || "Unavailable", detail: "Main-game volatility" },
+      { group: "Main Statistics", label: "Bonus Variance", value: bonusVariance || "Unavailable", detail: "Bonus win spread" },
+      { group: "Main Statistics", label: "Bonus Std. Deviation", value: bonusStdDev || "Unavailable", detail: "Bonus volatility" },
+      { group: "Main Statistics", label: "Avg Trap Power", value: trapPower ? formatRulesMultiplier(trapPower) : "Unavailable", detail: "Per completed bonus" },
+      { group: "Main Statistics", label: "Avg Final Multiplier", value: finalMultiplier || "Unavailable", detail: "Ouch Stomp result" },
+      {
+        group: "Feature Frequencies",
+        label: "Any Feature",
+        value: anyFeatureFrequency
+          ? formatFrequencyRate(frequencyToRate(anyFeatureFrequency))
+          : formatFrequencyRate(baseFeatureRate, { approximate: true }),
+        detail: anyFeatureFrequency
+          ? "Distinct rounds; overlapping feature events count once"
+          : "Approximation until the report contains exact distinct-round counts",
+      },
+      { group: "Feature Frequencies", label: "Stomp", value: stompFrequency || "Unavailable", detail: "Per paid spin" },
+      { group: "Feature Frequencies", label: "Crush", value: crushFrequency || "Unavailable", detail: "Per paid spin" },
+      { group: "Feature Frequencies", label: "Party", value: partyFrequency || "Unavailable", detail: "Per paid spin" },
+      {
+        group: "Feature Frequencies",
+        label: "Golf Swing",
+        value: normalGolfFrequency || golfFrequency || "Unavailable",
+        detail: normalGolfFrequency ? "Animal pick" : (golfHitRate || "All golf swings"),
+      },
+      {
+        group: "Feature Frequencies",
+        label: "Super Golf Swing",
+        value: superGolfFrequency || "Unavailable",
+        detail: superGolfFrequency ? "Unicorn pick" : "Run a simulation with the updated report",
+      },
+      { group: "Feature Frequencies", label: "Regular Bonus", value: regularBonusFrequency || "Unavailable", detail: "Per paid spin" },
+      { group: "Feature Frequencies", label: "Super Bonus", value: superBonusFrequency || "Unavailable", detail: "Per paid spin" },
+      { group: "Feature Frequencies", label: "Unicorn Landing", value: unicornFrequency || "Unavailable", detail: "Per paid spin" },
     ],
   };
 }
@@ -180,6 +238,7 @@ export function buildGameRulesContent(config = serverConfig) {
           "A miss pays nothing; a hit spins the displayed jackpot wheel.",
           `Normal Golf Swing jackpots range from ${formatRange(config.golfSwingJackpotSegmentsAndWeight, "1x - 512x")}.`,
           "If the giant picks the rainbow unicorn, Super Golf Swing uses the upgraded jackpot wheel.",
+          `After a natural Golf Swing triggers, it has a ${formatPercent(config.golfSwingUnicornBoost?.oddsToAddUnicornWhenGoldSwing, "0%")} chance to add a unicorn as an extra golf target.`,
           `Super Golf Swing jackpots range from ${formatRange(config.golfSwingSuperJackpotSegmentsAndWeight, "10x - 5120x")}.`,
         ],
         images: ["giant_golfswing", "golf_flag", "1", "14"],

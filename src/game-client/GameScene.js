@@ -3958,7 +3958,7 @@ export class GameScene extends Phaser.Scene {
     return killEvent;
   }
 
-  async presentParallelStompKills(crushedCells = [], animalKillEvents = [], angerReactorPositions = []) {
+  async presentParallelStompKills(crushedCells = [], animalKillEvents = []) {
     await Promise.all(crushedCells.map((cell) => {
       const killEvent = cell.isAnimal
         ? this.getAnimalKillEvent(animalKillEvents, cell)
@@ -3969,7 +3969,7 @@ export class GameScene extends Phaser.Scene {
     const animalEvents = crushedCells
       .filter((cell) => cell.isAnimal)
       .map((cell) => this.getAnimalKillEvent(animalKillEvents, cell));
-    await this.presentAnimalAngerReactions(animalEvents, angerReactorPositions);
+    return animalEvents;
   }
 
   async presentUnicornSuperBonusOvercharge(fromX, fromY) {
@@ -6420,7 +6420,6 @@ export class GameScene extends Phaser.Scene {
     const startY = GRID_OFFSET_Y - CELL_SIZE * 4.1;
     const impactY = bounds.centerY + CELL_SIZE * 0.08;
     const slamY = impactY + CELL_SIZE * 0.1;
-    const holdY = impactY - CELL_SIZE * 0.42;
     const fearRevealY = impactY - CELL_SIZE * 1.35;
     const foot = this.add.image(footX, startY, "giantfoot")
       .setDepth(DEPTH.stomp)
@@ -6474,7 +6473,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnStompImpactBurst(bounds.centerX, impactY + CELL_SIZE * 0.16, bounds.width);
     this.time.delayedCall(320, () => this.playGiantLaughSfx());
     if (crushedCells.length) {
-      await this.presentParallelStompKills(crushedCells, animalKillEvents, angerReactorPositions);
+      const animalEvents = await this.presentParallelStompKills(crushedCells, animalKillEvents);
       if (winCapReached) {
         await this.waitForStompCoinSettling();
         const capTarget = this.clampToWinCap(roundTwa);
@@ -6482,8 +6481,17 @@ export class GameScene extends Phaser.Scene {
         this.stompWinCapHandled = true;
         this.currentWin = capTarget;
         await this.pullStompFootOut(foot, startY, footScale);
+        await this.presentAnimalAngerReactions(animalEvents, angerReactorPositions);
         return;
       }
+
+      // Let the impact settle before the giant retreats from the board.
+      await this.waitForPresentation(1500, { skippable: true });
+
+      // The surviving animals only begin feeding the meter after the giant has
+      // lifted away, so their retaliation reads as a response to the stomp.
+      await this.pullStompFootOut(foot, startY, footScale);
+      await this.presentAnimalAngerReactions(animalEvents, angerReactorPositions);
       if (superBonusTriggered) {
         const cloud = this.activeUnicornCloud;
         const origin = cloud
@@ -6501,18 +6509,7 @@ export class GameScene extends Phaser.Scene {
 
     await this.resolveAnimalAngerMood(bonusTriggered || superBonusTriggered);
 
-    await this.tweenPromise({
-      targets: foot,
-      y: holdY,
-      scaleX: footScale,
-      scaleY: footScale,
-      duration: 360,
-      ease: "Back.easeOut",
-    });
-
-    await this.waitForPresentation(650, { skippable: true });
-
-    await this.pullStompFootOut(foot, startY, footScale);
+    // Anger feedback and any bonus overcharge play over the uncovered survivors.
   }
 
   async presentStompFeature(stompEvent = {}, { roundTwa = 0 } = {}) {

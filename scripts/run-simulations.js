@@ -504,6 +504,9 @@ let stompFeatureRounds = 0;
 let crushFeatureRounds = 0;
 let partyFeatureRounds = 0;
 let golfswingFeatureRounds = 0;
+let normalGolfswingFeatureRounds = 0;
+let superGolfswingFeatureRounds = 0;
+let anyFeatureRounds = 0;
 let golfswingHitRounds = 0;
 let golfswingMissRounds = 0;
 let totalGolfswingJackpotWin = 0;
@@ -584,14 +587,21 @@ for (let i = 1; i <= rounds; i += 1) {
   animalsCrushedPerRound.push(animalsCrushed);
   totalAnimalsCrushed += animalsCrushed;
 
-  if (server.hasStomp(states)) stompFeatureRounds += 1;
-  if (server.hasCrush(states)) crushFeatureRounds += 1;
-  if (server.hasParty(states)) partyFeatureRounds += 1;
+  const hadStomp = server.hasStomp(states);
+  const hadCrush = server.hasCrush(states);
+  const hadParty = server.hasParty(states);
+  if (hadStomp) stompFeatureRounds += 1;
+  if (hadCrush) crushFeatureRounds += 1;
+  if (hadParty) partyFeatureRounds += 1;
 
-  if (server.hasGolfswing(states)) {
+  const swingState = states.find((state) => state.golfswingEvent?.triggered);
+  const swingEvent = swingState?.golfswingEvent;
+  const hadGolfswing = swingEvent?.triggered === true;
+  const hadSuperGolfswing = swingEvent?.isSuperGolfswing === true;
+  if (hadGolfswing) {
     golfswingFeatureRounds += 1;
-    const swingState = states.find((state) => state.golfswingEvent?.triggered);
-    const swingEvent = swingState?.golfswingEvent;
+    if (hadSuperGolfswing) superGolfswingFeatureRounds += 1;
+    else normalGolfswingFeatureRounds += 1;
     if (swingEvent?.hit) {
       golfswingHitRounds += 1;
       const jackpotWin = Number(swingEvent.jackpotWin) || 0;
@@ -611,6 +621,9 @@ for (let i = 1; i <= rounds; i += 1) {
   if (hadUnicornOnBoard && hadSuperBonus) unicornSuperBonusRounds += 1;
 
   const hadBonus = server.hasBonus(states);
+  if (hadStomp || hadCrush || hadParty || hadGolfswing || hadBonus || hadSuperBonus) {
+    anyFeatureRounds += 1;
+  }
   if (hadBonus) {
     bonusRounds += 1;
     bonusWinsPerBonusRound.push(bonusWin);
@@ -888,6 +901,13 @@ const report = {
     },
   },
   features: {
+    anyFeature: {
+      description: "Distinct paid rounds containing any tracked feature: stomp, crush, party, normal/super golf swing, regular bonus, or super bonus. Overlapping events count once.",
+      triggeredRounds: anyFeatureRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((anyFeatureRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(anyFeatureRounds, completedRounds)
+    },
     stompFeature: {
       triggeredRounds: stompFeatureRounds,
       triggerRatePercent:
@@ -935,6 +955,20 @@ const report = {
             ? fourDecimals((golfswingJackpotSegmentCounts[String(segment)] / golfswingHitRounds) * 100)
             : 0,
         })),
+    },
+    normalGolfswingFeature: {
+      description: "Golf swing where the giant picked an animal rather than the unicorn.",
+      triggeredRounds: normalGolfswingFeatureRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((normalGolfswingFeatureRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(normalGolfswingFeatureRounds, completedRounds)
+    },
+    superGolfswingFeature: {
+      description: "Golf swing where the giant picked the unicorn and used the super jackpot table.",
+      triggeredRounds: superGolfswingFeatureRounds,
+      triggerRatePercent:
+        completedRounds > 0 ? twoDecimals((superGolfswingFeatureRounds / completedRounds) * 100) : 0,
+      frequency: formatFrequency(superGolfswingFeatureRounds, completedRounds)
     },
     unicornOnGameArea: {
       description: "Paid spin with symbol 14 visible on reels (unicorn injection or dev ticket board).",
@@ -1003,10 +1037,13 @@ console.log(`Unicorn on board: ${report.features.unicornOnGameArea.frequency} ($
 console.log(`Unicorn→super:    ${report.features.unicornOnGameArea.superBonusFromUnicornRatePercent}% of unicorn rounds (${report.features.unicornOnGameArea.superBonusFromUnicornRounds})`);
 console.log(`Avg trap power:   ${report.bonus.trapPower.average}  (max ${report.bonus.trapPower.max})`);
 console.log(`Avg final mult:   ${report.bonus.finalMultiplier.average}x`);
+console.log(`Any feature:      ${report.features.anyFeature.frequency} (${report.features.anyFeature.triggeredRounds} rounds)`);
 console.log(`Stomp feature:    ${report.features.stompFeature.frequency} (${report.features.stompFeature.triggeredRounds} rounds)`);
 console.log(`Crush feature:    ${report.features.crushFeature.frequency} (${report.features.crushFeature.triggeredRounds} rounds)`);
 console.log(`Party feature:    ${report.features.partyFeature.frequency} (${report.features.partyFeature.triggeredRounds} rounds)`);
-console.log(`Golfswing:        ${report.features.golfswingFeature.frequency} (${report.features.golfswingFeature.triggeredRounds} rounds, ${report.features.golfswingFeature.hitRatePercent}% hit)`);
+console.log(`Golfswing (all):  ${report.features.golfswingFeature.frequency} (${report.features.golfswingFeature.triggeredRounds} rounds, ${report.features.golfswingFeature.hitRatePercent}% hit)`);
+console.log(`Normal golfswing: ${report.features.normalGolfswingFeature.frequency} (${report.features.normalGolfswingFeature.triggeredRounds} rounds)`);
+console.log(`Super golfswing:  ${report.features.superGolfswingFeature.frequency} (${report.features.superGolfswingFeature.triggeredRounds} rounds)`);
 console.log(`Animals crushed:  ${report.features.animalsCrushed.total} total, ${report.features.animalsCrushed.averagePerRound} avg/round`);
 console.log(`Animals/trigger:  ${report.features.animalsCrushed.averageOnBonusTriggerRound} avg on bonus-entry spin, ratio ${report.features.animalsCrushed.animalsCrushedPerBonusRatio}`);
 console.log(`Animals/bonus:    ${report.features.animalsCrushed.averageBetweenBonuses} avg crushed between bonuses (${report.features.animalsCrushed.averagePaidSpinsBetweenBonuses} paid spins)`);

@@ -250,6 +250,28 @@ test("super golf swing picks super jackpot segments when unicorn is chosen", () 
   assert.ok(result.golfswingEvent.jackpotSegments.includes(5120));
 });
 
+test("natural golf swings can add a unicorn as an extra target", () => {
+  const unicorn = Number(serverConfig.unicornSymbol ?? 14);
+  const board = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [1, 2, 3],
+    [4, 5, 6],
+    [1, 2, 3],
+  ];
+  const server = new GameServer({ random: () => 0 });
+
+  const result = server.resolveGolfswingFeature(board, {
+    allowNatural: true,
+    betSize: 1,
+  });
+
+  assert.ok(result?.golfswingEvent?.triggered);
+  assert.equal(result.golfswingEvent.unicornBoosted, true);
+  assert.equal(result.golfswingEvent.reelsBeforeGolfswing[0][0], unicorn);
+  assert.ok(server.findUnicornPositions(result.golfswingEvent.reelsBeforeGolfswing).length >= 1);
+});
+
 test("symbol win injection can add ways wins on normal noWin ticket draws", () => {
   const server = new GameServer({ random: () => 0 });
   const board = server.maybeInjectSymbolWin(server.buildNoWinBoard(), {

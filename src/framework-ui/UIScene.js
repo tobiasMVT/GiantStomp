@@ -95,6 +95,7 @@ export class UIScene extends Phaser.Scene {
     this.gameRulesContentContainer = null;
     this.gameRulesContentBounds = null;
     this.gameRulesDrag = null;
+    this.gameRulesClickTargets = [];
   }
 
   create() {
@@ -105,7 +106,6 @@ export class UIScene extends Phaser.Scene {
     this.scale.on("resize", this.layoutUI, this);
     this.scale.on("resize", this.layoutGameRules, this);
     this.input.on("pointerdown", this.handleScenePointerDown, this);
-    this.input.on("pointerdown", this.handleGameRulesPointerDown, this);
     this.input.on("pointermove", this.handleGameRulesPointerMove, this);
     this.input.on("pointerup", this.handleGameRulesPointerUp, this);
     this.input.on("wheel", this.handleGameRulesWheel, this);
@@ -116,7 +116,6 @@ export class UIScene extends Phaser.Scene {
       this.scale.off("resize", this.layoutUI, this);
       this.scale.off("resize", this.layoutGameRules, this);
       this.input.off("pointerdown", this.handleScenePointerDown, this);
-      this.input.off("pointerdown", this.handleGameRulesPointerDown, this);
       this.input.off("pointermove", this.handleGameRulesPointerMove, this);
       this.input.off("pointerup", this.handleGameRulesPointerUp, this);
       this.input.off("wheel", this.handleGameRulesWheel, this);
@@ -2333,6 +2332,7 @@ export default gameClientConfig;
     });
     this.gameRulesElements = [];
     this.gameRulesContentContainer = null;
+    this.gameRulesClickTargets = [];
   }
 
   layoutGameRules() {
@@ -2370,6 +2370,17 @@ export default gameClientConfig;
 
   handleGameRulesPointerDown(pointer) {
     if (!this.gameRulesVisible || !this.gameRulesContentBounds) return;
+    const target = [...this.gameRulesClickTargets]
+      .reverse()
+      .find((entry) => (
+        pointer.x >= entry.x - entry.width / 2 && pointer.x <= entry.x + entry.width / 2 &&
+        pointer.y >= entry.y - entry.height / 2 && pointer.y <= entry.y + entry.height / 2
+      ));
+    if (target) {
+      this.gameRulesDrag = null;
+      target.onClick();
+      return;
+    }
     const bounds = this.gameRulesContentBounds;
     if (
       pointer.x < bounds.x || pointer.x > bounds.x + bounds.width ||
@@ -2440,10 +2451,7 @@ export default gameClientConfig;
         color: active ? "#fcd12a" : "#9b836c",
       }).setOrigin(0.5));
       if (active) {
-        bg.setInteractive({ useHandCursor: true });
-        bg.on("pointerover", () => bg.setFillStyle(0x684025, 1));
-        bg.on("pointerout", () => bg.setFillStyle(fill, 0.96));
-        bg.on("pointerdown", () => onClick?.());
+        this.gameRulesClickTargets.push({ x, y, width: buttonW, height: buttonH, onClick });
       }
       return { bg, text };
     };
@@ -2451,6 +2459,7 @@ export default gameClientConfig;
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x080506, 0.78)
       .setDepth(9000)
       .setInteractive();
+    overlay.on("pointerdown", (pointer) => this.handleGameRulesPointerDown(pointer));
     this.gameRulesElements.push(overlay);
     add(this.add.rectangle(panelCenterX, panelCenterY, panelW, panelH, 0x21150f, 0.985)
       .setStrokeStyle(2, 0xfcd12a, 0.92));
@@ -2621,25 +2630,35 @@ export default gameClientConfig;
       const gap = 10;
       const cardW = (contentW - gap) / 2;
       const cardH = 80;
-      page.statistics.forEach((stat, index) => {
-        const label = typeof stat === "string" ? stat : stat.label;
-        const value = typeof stat === "string" ? "Coming soon" : stat.value;
-        const detail = typeof stat === "string" ? "" : stat.detail;
-        const x = contentX + (index % 2) * (cardW + gap);
-        const y = cursorY + Math.floor(index / 2) * (cardH + gap);
-        addContent(this.add.rectangle(x + cardW / 2, y + cardH / 2, cardW, cardH, 0x160f0b, 0.88)
-          .setStrokeStyle(1, 0x8b5a2b, 0.78));
-        contentText(x + 12, y + 12, label, {
-          fontFamily: "Arial", fontSize: "12px", fontStyle: "bold", color: "#fcd12a",
-        }).setOrigin(0, 0);
-        contentText(x + 12, y + 32, value, {
-          fontFamily: "Arial", fontSize: "17px", fontStyle: "bold", color: "#f2e4ce",
-        }).setOrigin(0, 0);
-        contentText(x + 12, y + 57, detail, {
-          fontFamily: "Arial", fontSize: "11px", color: "#bfa88a",
-        }).setOrigin(0, 0);
+      const groups = new Map();
+      page.statistics.forEach((stat) => {
+        const group = typeof stat === "string" ? "Statistics" : (stat.group || "Statistics");
+        const entries = groups.get(group) || [];
+        entries.push(stat);
+        groups.set(group, entries);
       });
-      cursorY += Math.ceil(page.statistics.length / 2) * (cardH + gap);
+      groups.forEach((entries, group) => {
+        cursorY = addCopy(group, cursorY + 4, { size: 15, color: "#fcd12a", bold: true }) + 8;
+        entries.forEach((stat, index) => {
+          const label = typeof stat === "string" ? stat : stat.label;
+          const value = typeof stat === "string" ? "Coming soon" : stat.value;
+          const detail = typeof stat === "string" ? "" : stat.detail;
+          const x = contentX + (index % 2) * (cardW + gap);
+          const y = cursorY + Math.floor(index / 2) * (cardH + gap);
+          addContent(this.add.rectangle(x + cardW / 2, y + cardH / 2, cardW, cardH, 0x160f0b, 0.88)
+            .setStrokeStyle(1, 0x8b5a2b, 0.78));
+          contentText(x + 12, y + 12, label, {
+            fontFamily: "Arial", fontSize: "12px", fontStyle: "bold", color: "#fcd12a",
+          }).setOrigin(0, 0);
+          contentText(x + 12, y + 32, value, {
+            fontFamily: "Arial", fontSize: "17px", fontStyle: "bold", color: "#f2e4ce",
+          }).setOrigin(0, 0);
+          contentText(x + 12, y + 57, detail, {
+            fontFamily: "Arial", fontSize: "11px", color: "#bfa88a",
+          }).setOrigin(0, 0);
+        });
+        cursorY += Math.ceil(entries.length / 2) * (cardH + gap) + 8;
+      });
     }
 
     if (page.reportText) {
@@ -2675,10 +2694,7 @@ export default gameClientConfig;
       }).setOrigin(0.5).setDepth(9005);
       this.gameRulesElements.push(bg, text);
       if (!active) return;
-      bg.setInteractive({ useHandCursor: true });
-      bg.on("pointerover", () => bg.setFillStyle(0x684025, 1));
-      bg.on("pointerout", () => bg.setFillStyle(fill, 0.98));
-      bg.on("pointerdown", () => onClick());
+      this.gameRulesClickTargets.push({ x, y, width: buttonW, height: buttonH, onClick });
     };
     const footerY = panelY + panelH - footerH / 2;
     floatingButton(contentX + 52, footerY, 104, 34, "‹ Previous", () =>

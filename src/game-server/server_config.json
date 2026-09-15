@@ -174,9 +174,9 @@
     "80": 9,
     "160": 9,
     "320": 2,
-    "640": 1,
-    "1280": 0.5,
-    "2560": 0.1,
+    "640": 0.5,
+    "1280": 0.4,
+    "2560": 0.07,
     "5120": 0.01
   },
   "partyFeature": {
@@ -190,9 +190,9 @@
     "0": 0,
     "1": 4,
     "2": 6,
-    "3": 8,
-    "4": 11,
-    "5": 23,
+    "3": 7,
+    "4": 10,
+    "5": 22,
     "6": 75
   },
   "angerMeterTickOdds": 0.80,
@@ -245,6 +245,9 @@
     "maxSpins": 250,
     "guaranteedPowerSeedSpins": 2,
     "guaranteedPowerSeedSymbols": [111, 222, 333, 444, 555]
+  },
+  "golfSwingUnicornBoost": {
+      "oddsToAddUnicornWhenGoldSwing": 0.15
   },
   "maxCascadesPerSpin": 100,
   "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "superBonusEntry", "stompEntry", "crushEntry", "partyEntry", "golfswingEntry", "superGolfswingEntry", "unicornLanding"],

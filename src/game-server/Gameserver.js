@@ -1272,6 +1272,32 @@ export class GameServer {
     return nextBoard;
   }
 
+  maybeBoostGolfswingWithUnicorn(board, { allowNatural = false } = {}) {
+    if (!allowNatural) return { board, unicornBoosted: false };
+
+    const configuredOdds = Number(
+      serverConfig.golfSwingUnicornBoost?.oddsToAddUnicornWhenGoldSwing ?? 0
+    );
+    const odds = Math.max(0, Math.min(1, configuredOdds));
+    if (odds <= 0 || this.random() >= odds) {
+      return { board, unicornBoosted: false };
+    }
+
+    const unicornSymbol = this.getUnicornSymbol();
+    const availableCells = [];
+    for (let reel = 0; reel < this.width; reel += 1) {
+      for (let row = 0; row < this.height; row += 1) {
+        if (Number(board[reel][row]) !== unicornSymbol) availableCells.push({ reel, row });
+      }
+    }
+    if (!availableCells.length) return { board, unicornBoosted: false };
+
+    const nextBoard = clone(board);
+    const { reel, row } = availableCells[Math.floor(this.random() * availableCells.length)];
+    nextBoard[reel][row] = unicornSymbol;
+    return { board: nextBoard, unicornBoosted: true };
+  }
+
   findAnimalPositions(board) {
     const animalSymbols = this.getAnimalSymbolSet();
     const positions = [];
@@ -1541,8 +1567,14 @@ export class GameServer {
     const triggered = forceGolfswing || this.random() < Number(cfg.odds || 0);
     if (!triggered) return null;
 
-    const animals = this.findAnimalPositions(board);
-    const unicorns = this.findUnicornPositions(board);
+    // Natural swings may receive one extra unicorn after the feature has triggered.
+    // It becomes another possible golf target; it does not force a Super Golf Swing.
+    const boostResult = this.maybeBoostGolfswingWithUnicorn(board, {
+      allowNatural: allowNatural && !forceGolfswing && !forceSuperGolfswing,
+    });
+    const golfswingBoard = boostResult.board;
+    const animals = this.findAnimalPositions(golfswingBoard);
+    const unicorns = this.findUnicornPositions(golfswingBoard);
     let picked;
     let isSuperGolfswing = false;
 
@@ -1589,8 +1621,9 @@ export class GameServer {
       golfswingEvent: {
         triggered: true,
         isSuperGolfswing,
+        unicornBoosted: boostResult.unicornBoosted,
         pickedCell: { ...picked },
-        reelsBeforeGolfswing: clone(board),
+        reelsBeforeGolfswing: clone(golfswingBoard),
         hit,
         aimDurationMs,
         hitZone,
