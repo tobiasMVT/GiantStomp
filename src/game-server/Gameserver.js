@@ -565,6 +565,12 @@ export class GameServer {
     if (ticket === "superGolfswingEntry") {
       return this.buildGolfswingEntryBoard({ requireUnicorn: true });
     }
+    if (ticket === "unicornLanding") {
+      const board = this.buildNoWinBoard();
+      const { reel, row } = this.pickRandomUnicornCell();
+      board[reel][row] = this.getUnicornSymbol();
+      return board;
+    }
     if (ticket === "superBonusEntry") {
       const board = this.buildNoWinBoard();
       const { reel: unicornReel, row: unicornRow } = this.pickRandomUnicornCell();
@@ -2200,6 +2206,7 @@ export class GameServer {
       "partyEntry",
       "golfswingEntry",
       "superGolfswingEntry",
+      "unicornLanding",
     ]);
     return allowed.has(strategy) ? strategy : null;
   }
@@ -2219,6 +2226,11 @@ export class GameServer {
     }
     if (strategy === "superGolfswingEntry") {
       return this.hasSuperGolfswing(roundStates);
+    }
+    if (strategy === "unicornLanding") {
+      return this.hasUnicornOnGameArea(roundStates)
+        && !this.hasGolfswing(roundStates)
+        && !this.hasBonus(roundStates);
     }
     return false;
   }
@@ -2257,6 +2269,7 @@ export class GameServer {
       "partyEntry",
       "golfswingEntry",
       "superGolfswingEntry",
+      "unicornLanding",
     ]);
 
     const generateOnce = (boardStrategy = ticketStrategy) => this.generateRoundStatesOnce({
@@ -2266,7 +2279,7 @@ export class GameServer {
     });
 
     if (normalizedFeatureBuy) {
-      if (normalizedFeatureBuy === "golfswingEntry" || normalizedFeatureBuy === "superGolfswingEntry") {
+      if (["golfswingEntry", "superGolfswingEntry", "unicornLanding"].includes(normalizedFeatureBuy)) {
         const maxAttempts = 1000;
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           const roundStates = generateOnce(normalizedFeatureBuy);
@@ -2332,6 +2345,11 @@ export class GameServer {
     if (ticket === "partyEntry") return this.hasParty(roundStates);
     if (ticket === "golfswingEntry") return this.hasGolfswing(roundStates);
     if (ticket === "superGolfswingEntry") return this.hasSuperGolfswing(roundStates);
+    if (ticket === "unicornLanding") {
+      return this.hasUnicornOnGameArea(roundStates)
+        && !this.hasGolfswing(roundStates)
+        && !this.hasBonus(roundStates);
+    }
     return false;
   }
 }

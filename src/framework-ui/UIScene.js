@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import gameClientConfig from "../game-client/config/gameClientConfig";
+import { buildGameRulesContent, formatRulesMultiplier } from "../game-client/config/gameRulesContent";
 import ResponsiveTextBox from "./ResponsiveTextBox";
 
 const DEFAULT_THEME = {
@@ -83,6 +84,17 @@ export class UIScene extends Phaser.Scene {
     this.devPanelContainer = null;
     this.spinPointerIntent = null;
     this.freespinsCounterValue = null;
+
+    this.gameRulesModel = null;
+    this.gameRulesVisible = false;
+    this.gameRulesSelectedIndex = 0;
+    this.gameRulesTabOffset = 0;
+    this.gameRulesScrollY = 0;
+    this.gameRulesScrollMax = 0;
+    this.gameRulesElements = [];
+    this.gameRulesContentContainer = null;
+    this.gameRulesContentBounds = null;
+    this.gameRulesDrag = null;
   }
 
   create() {
@@ -91,13 +103,25 @@ export class UIScene extends Phaser.Scene {
     this.settings = null;
     this.layoutDebugGraphics = this.add.graphics().setDepth(5000);
     this.scale.on("resize", this.layoutUI, this);
+    this.scale.on("resize", this.layoutGameRules, this);
     this.input.on("pointerdown", this.handleScenePointerDown, this);
+    this.input.on("pointerdown", this.handleGameRulesPointerDown, this);
+    this.input.on("pointermove", this.handleGameRulesPointerMove, this);
+    this.input.on("pointerup", this.handleGameRulesPointerUp, this);
+    this.input.on("wheel", this.handleGameRulesWheel, this);
     this.input.keyboard?.on("keydown-SPACE", this.handleSpaceKeyDown, this);
+    this.input.keyboard?.on("keydown-ESC", this.handleGameRulesEscape, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off("resize", this.layoutUI, this);
+      this.scale.off("resize", this.layoutGameRules, this);
       this.input.off("pointerdown", this.handleScenePointerDown, this);
+      this.input.off("pointerdown", this.handleGameRulesPointerDown, this);
+      this.input.off("pointermove", this.handleGameRulesPointerMove, this);
+      this.input.off("pointerup", this.handleGameRulesPointerUp, this);
+      this.input.off("wheel", this.handleGameRulesWheel, this);
       this.input.keyboard?.off("keydown-SPACE", this.handleSpaceKeyDown, this);
+      this.input.keyboard?.off("keydown-ESC", this.handleGameRulesEscape, this);
       if (this.unsubscribeViewModel) {
         this.unsubscribeViewModel();
         this.unsubscribeViewModel = null;
@@ -136,6 +160,7 @@ export class UIScene extends Phaser.Scene {
       this.destroyMustSeeSliders();
       this.destroyCameraSliders();
       this.closeMustSeeInput();
+      this.hideGameRules();
       this.destroyResponsiveTextBoxes();
     });
   }
@@ -1433,6 +1458,10 @@ export class UIScene extends Phaser.Scene {
       return;
     }
 
+    if (this.gameRulesVisible) {
+      return;
+    }
+
     const vm = this.viewModel || {};
     if (vm.spinEnabled) {
       this.eventBus?.emit("intent:spinRequested");
@@ -2275,6 +2304,391 @@ export default gameClientConfig;
       ? Math.max(0.9, buttonScale)
       : fallbackScale;
     this.positionPickerNearButton(this._autoplayPickerContainer, this.controls.autoplayButton, pickerScale);
+  }
+
+  showGameRules() {
+    this.gameRulesModel = buildGameRulesContent();
+    this.gameRulesSelectedIndex = Phaser.Math.Clamp(
+      this.gameRulesSelectedIndex,
+      0,
+      Math.max(0, this.gameRulesModel.sections.length - 1)
+    );
+    this.gameRulesScrollY = 0;
+    this.gameRulesVisible = true;
+    this.renderGameRules();
+  }
+
+  hideGameRules() {
+    this.gameRulesVisible = false;
+    this.gameRulesDrag = null;
+    this.gameRulesContentBounds = null;
+    this.clearGameRulesOverlay();
+  }
+
+  clearGameRulesOverlay() {
+    this.gameRulesElements.forEach((element) => {
+      if (element && !element.destroyed) {
+        element.destroy(true);
+      }
+    });
+    this.gameRulesElements = [];
+    this.gameRulesContentContainer = null;
+  }
+
+  layoutGameRules() {
+    if (!this.gameRulesVisible) return;
+    this.renderGameRules({ preserveScroll: true });
+  }
+
+  selectGameRulesSection(index) {
+    const count = this.gameRulesModel?.sections?.length || 0;
+    if (!count) return;
+    this.gameRulesSelectedIndex = Phaser.Math.Clamp(index, 0, count - 1);
+    this.gameRulesScrollY = 0;
+    this.renderGameRules();
+  }
+
+  scrollGameRulesTabs(direction, visibleTabs) {
+    const count = this.gameRulesModel?.sections?.length || 0;
+    const maxOffset = Math.max(0, count - visibleTabs);
+    this.gameRulesTabOffset = Phaser.Math.Clamp(this.gameRulesTabOffset + direction, 0, maxOffset);
+    this.renderGameRules({ preserveScroll: true });
+  }
+
+  setGameRulesScroll(nextScroll) {
+    this.gameRulesScrollY = Phaser.Math.Clamp(nextScroll, 0, this.gameRulesScrollMax || 0);
+    if (this.gameRulesContentContainer) {
+      this.gameRulesContentContainer.setY(-this.gameRulesScrollY);
+    }
+  }
+
+  handleGameRulesEscape(event) {
+    if (!this.gameRulesVisible) return;
+    event?.preventDefault?.();
+    this.hideGameRules();
+  }
+
+  handleGameRulesPointerDown(pointer) {
+    if (!this.gameRulesVisible || !this.gameRulesContentBounds) return;
+    const bounds = this.gameRulesContentBounds;
+    if (
+      pointer.x < bounds.x || pointer.x > bounds.x + bounds.width ||
+      pointer.y < bounds.y || pointer.y > bounds.y + bounds.height
+    ) return;
+    this.gameRulesDrag = { pointerId: pointer.id, startY: pointer.y, startScroll: this.gameRulesScrollY };
+  }
+
+  handleGameRulesPointerMove(pointer) {
+    const drag = this.gameRulesDrag;
+    if (!this.gameRulesVisible || !drag || drag.pointerId !== pointer.id || !pointer.isDown) return;
+    this.setGameRulesScroll(drag.startScroll - (pointer.y - drag.startY));
+  }
+
+  handleGameRulesPointerUp(pointer) {
+    if (this.gameRulesDrag?.pointerId === pointer.id) {
+      this.gameRulesDrag = null;
+    }
+  }
+
+  handleGameRulesWheel(pointer, _objects, _deltaX, deltaY) {
+    if (!this.gameRulesVisible || !this.gameRulesContentBounds) return;
+    const bounds = this.gameRulesContentBounds;
+    if (
+      pointer.x >= bounds.x && pointer.x <= bounds.x + bounds.width &&
+      pointer.y >= bounds.y && pointer.y <= bounds.y + bounds.height
+    ) {
+      this.setGameRulesScroll(this.gameRulesScrollY + deltaY * 0.65);
+    }
+  }
+
+  renderGameRules({ preserveScroll = false } = {}) {
+    if (!this.gameRulesVisible || !this.gameRulesModel) return;
+    const retainedScroll = preserveScroll ? this.gameRulesScrollY : 0;
+    this.clearGameRulesOverlay();
+
+    const { width, height } = this.scale;
+    const panelW = Math.min(920, Math.max(300, width - 20));
+    const panelH = Math.min(720, Math.max(360, height - 20));
+    const panelX = Math.round((width - panelW) / 2);
+    const panelY = Math.round((height - panelH) / 2);
+    const panelCenterX = panelX + panelW / 2;
+    const panelCenterY = panelY + panelH / 2;
+    const contentX = panelX + 18;
+    const contentW = panelW - 36;
+    const headerH = 52;
+    const tabsY = panelY + headerH + 8;
+    const tabsH = 34;
+    const footerH = 52;
+    const contentY = tabsY + tabsH + 12;
+    const contentH = Math.max(120, panelY + panelH - footerH - 10 - contentY);
+    const sections = this.gameRulesModel.sections;
+    const root = this.add.container(0, 0).setDepth(9001);
+    this.gameRulesElements.push(root);
+
+    const add = (object) => {
+      root.add(object);
+      return object;
+    };
+    const addText = (x, y, text, style = {}) => add(this.add.text(x, y, text, style));
+    const button = (x, y, buttonW, buttonH, label, onClick, { active = true, compact = false } = {}) => {
+      const fill = active ? 0x4b2c1d : 0x21160f;
+      const border = active ? 0xfcd12a : 0x6b4423;
+      const bg = add(this.add.rectangle(x, y, buttonW, buttonH, fill, active ? 0.96 : 0.58)
+        .setStrokeStyle(1.5, border, 0.9));
+      const text = add(this.add.text(x, y, label, {
+        fontFamily: "Arial", fontSize: compact ? "12px" : "14px", fontStyle: "bold",
+        color: active ? "#fcd12a" : "#9b836c",
+      }).setOrigin(0.5));
+      if (active) {
+        bg.setInteractive({ useHandCursor: true });
+        bg.on("pointerover", () => bg.setFillStyle(0x684025, 1));
+        bg.on("pointerout", () => bg.setFillStyle(fill, 0.96));
+        bg.on("pointerdown", () => onClick?.());
+      }
+      return { bg, text };
+    };
+
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x080506, 0.78)
+      .setDepth(9000)
+      .setInteractive();
+    this.gameRulesElements.push(overlay);
+    add(this.add.rectangle(panelCenterX, panelCenterY, panelW, panelH, 0x21150f, 0.985)
+      .setStrokeStyle(2, 0xfcd12a, 0.92));
+    add(this.add.rectangle(panelCenterX, panelY + headerH / 2, panelW - 2, headerH, 0x3a2317, 0.94));
+    addText(contentX, panelY + 15, this.gameRulesModel.title, {
+      fontFamily: "Arial", fontSize: "23px", fontStyle: "bold", color: "#fcd12a",
+      stroke: "#160b05", strokeThickness: 3,
+    });
+    button(panelX + panelW - 34, panelY + headerH / 2, 34, 30, "×", () => this.hideGameRules());
+
+    const visibleTabs = Phaser.Math.Clamp(Math.floor((contentW - 58) / 118), 2, 5);
+    const maxTabOffset = Math.max(0, sections.length - visibleTabs);
+    this.gameRulesTabOffset = Phaser.Math.Clamp(this.gameRulesTabOffset, 0, maxTabOffset);
+    if (this.gameRulesSelectedIndex < this.gameRulesTabOffset) {
+      this.gameRulesTabOffset = this.gameRulesSelectedIndex;
+    } else if (this.gameRulesSelectedIndex >= this.gameRulesTabOffset + visibleTabs) {
+      this.gameRulesTabOffset = this.gameRulesSelectedIndex - visibleTabs + 1;
+    }
+    const arrowW = 24;
+    const tabGap = 5;
+    const availableTabsW = contentW - arrowW * 2 - tabGap * 2;
+    const tabW = (availableTabsW - tabGap * (visibleTabs - 1)) / visibleTabs;
+    button(contentX + arrowW / 2, tabsY + tabsH / 2, arrowW, tabsH, "‹", () =>
+      this.scrollGameRulesTabs(-1, visibleTabs), { active: this.gameRulesTabOffset > 0, compact: true });
+    for (let offset = 0; offset < visibleTabs; offset += 1) {
+      const index = this.gameRulesTabOffset + offset;
+      if (!sections[index]) continue;
+      const x = contentX + arrowW + tabGap + offset * (tabW + tabGap) + tabW / 2;
+      const selected = index === this.gameRulesSelectedIndex;
+      button(x, tabsY + tabsH / 2, tabW, tabsH, sections[index].label, () =>
+        this.selectGameRulesSection(index), { active: true, compact: true });
+      if (selected) {
+        add(this.add.rectangle(x, tabsY + tabsH - 2, tabW - 8, 3, 0xffffff, 0.86));
+      }
+    }
+    button(contentX + contentW - arrowW / 2, tabsY + tabsH / 2, arrowW, tabsH, "›", () =>
+      this.scrollGameRulesTabs(1, visibleTabs), { active: this.gameRulesTabOffset < maxTabOffset, compact: true });
+
+    const page = sections[this.gameRulesSelectedIndex];
+    const content = this.add.container(0, 0);
+    root.add(content);
+    this.gameRulesContentContainer = content;
+    this.gameRulesContentBounds = { x: contentX, y: contentY, width: contentW, height: contentH };
+    const maskGraphics = this.add.graphics().fillStyle(0xffffff).fillRect(contentX, contentY, contentW, contentH).setVisible(false);
+    maskGraphics.setDepth(9002);
+    content.setMask(maskGraphics.createGeometryMask());
+    this.gameRulesElements.push(maskGraphics);
+
+    const addContent = (object) => {
+      content.add(object);
+      return object;
+    };
+    const contentText = (x, y, text, style = {}) => addContent(this.add.text(x, y, text, style));
+    const addCopy = (text, y, { size = 14, color = "#f2e4ce", bold = false } = {}) => {
+      const object = contentText(contentX, y, text, {
+        fontFamily: "Arial", fontSize: `${size}px`, color, fontStyle: bold ? "bold" : "normal",
+        wordWrap: { width: contentW }, lineSpacing: 3,
+      }).setOrigin(0, 0);
+      return y + object.height;
+    };
+    const addImages = (imageKeys, y) => {
+      if (!imageKeys?.length) return y;
+      const count = Math.min(imageKeys.length, 6);
+      const gap = 8;
+      const cardW = Math.min(100, (contentW - gap * (count - 1)) / count);
+      const cardH = Math.min(92, cardW * 0.86);
+      imageKeys.slice(0, count).forEach((key, index) => {
+        const x = contentX + index * (cardW + gap) + cardW / 2;
+        addContent(this.add.rectangle(x, y + cardH / 2, cardW, cardH, 0x120c09, 0.72)
+          .setStrokeStyle(1, 0x8b5a2b, 0.82));
+        if (this.textures.exists(key)) {
+          const sprite = this.add.image(x, y + cardH / 2, key);
+          const scale = Math.min((cardW - 14) / sprite.width, (cardH - 14) / sprite.height, 1);
+          sprite.setScale(scale);
+          addContent(sprite);
+        }
+      });
+      return y + cardH + 14;
+    };
+
+    let cursorY = contentY;
+    cursorY = addCopy(page.title, cursorY, { size: 21, color: "#fcd12a", bold: true }) + 8;
+    cursorY = addCopy(page.intro, cursorY, { size: 14 }) + 12;
+    cursorY = addImages(page.images, cursorY);
+    page.bullets?.forEach((item) => {
+      cursorY = addCopy(`• ${item}`, cursorY, { size: 14, color: "#ead7bd" }) + 7;
+    });
+
+    if (page.table) {
+      cursorY += 6;
+      const columns = [0.43, 0.19, 0.19, 0.19].map((share) => share * contentW);
+      const rowH = 38;
+      const drawTableRow = (y, cells, isHeader = false, icon = null) => {
+        let x = contentX;
+        cells.forEach((cell, index) => {
+          const cellW = columns[index];
+          addContent(this.add.rectangle(x + cellW / 2, y + rowH / 2, cellW - 2, rowH - 2,
+            isHeader ? 0x4b2c1d : 0x160f0b, isHeader ? 0.98 : 0.82)
+            .setStrokeStyle(1, 0x6b4423, 0.7));
+          if (index === 0 && icon && this.textures.exists(icon)) {
+            const image = this.add.image(x + 20, y + rowH / 2, icon);
+            image.setScale(Math.min(0.22, 25 / image.height));
+            addContent(image);
+          }
+          contentText(x + (index === 0 ? (icon ? 38 : 8) : cellW / 2), y + rowH / 2, cell, {
+            fontFamily: "Arial", fontSize: isHeader ? "12px" : "13px", fontStyle: isHeader ? "bold" : "normal",
+            color: isHeader ? "#fcd12a" : "#f2e4ce",
+          }).setOrigin(index === 0 ? 0 : 0.5, 0.5);
+          x += cellW;
+        });
+      };
+      drawTableRow(cursorY, page.table.headers, true);
+      cursorY += rowH;
+      page.table.rows.forEach((row) => {
+        drawTableRow(cursorY, [row.label, ...row.values], false, row.icon);
+        cursorY += rowH;
+      });
+      cursorY += 8;
+    }
+
+    if (page.symbolCards?.length) {
+      cursorY += 6;
+      const gap = 8;
+      const cardW = (contentW - gap) / 2;
+      const cardH = 64;
+      page.symbolCards.forEach((card, index) => {
+        const column = index % 2;
+        const row = Math.floor(index / 2);
+        const x = contentX + column * (cardW + gap);
+        const y = cursorY + row * (cardH + gap);
+        addContent(this.add.rectangle(x + cardW / 2, y + cardH / 2, cardW, cardH, 0x160f0b, 0.82)
+          .setStrokeStyle(1, 0x8b5a2b, 0.76));
+        if (this.textures.exists(card.icon)) {
+          const image = this.add.image(x + 27, y + cardH / 2, card.icon);
+          image.setScale(Math.min(0.26, 44 / image.height));
+          addContent(image);
+        }
+        contentText(x + 54, y + 9, card.title, {
+          fontFamily: "Arial", fontSize: "12px", fontStyle: "bold", color: "#fcd12a",
+        }).setOrigin(0, 0);
+        contentText(x + 54, y + 27, card.detail, {
+          fontFamily: "Arial", fontSize: "11px", color: "#ead7bd", wordWrap: { width: cardW - 62 },
+        }).setOrigin(0, 0);
+      });
+      cursorY += Math.ceil(page.symbolCards.length / 2) * (cardH + gap) + 4;
+    }
+
+    if (page.multiplierValues?.length) {
+      cursorY = addCopy("Damage multiplier steps", cursorY + 6, { size: 15, color: "#fcd12a", bold: true }) + 8;
+      const chipGap = 5;
+      const chipW = Math.max(38, Math.min(58, (contentW - chipGap * 5) / 6));
+      page.multiplierValues.forEach((value, index) => {
+        const column = index % 6;
+        const row = Math.floor(index / 6);
+        const x = contentX + column * (chipW + chipGap);
+        const y = cursorY + row * 30;
+        addContent(this.add.rectangle(x + chipW / 2, y + 12, chipW, 24, 0x4b2c1d, 0.9)
+          .setStrokeStyle(1, 0xfcd12a, 0.72));
+        contentText(x + chipW / 2, y + 12, `${formatRulesMultiplier(value)}`, {
+          fontFamily: "Arial", fontSize: "12px", fontStyle: "bold", color: "#fcd12a",
+        }).setOrigin(0.5);
+      });
+      cursorY += Math.ceil(page.multiplierValues.length / 6) * 30 + 8;
+    }
+
+    if (page.statistics?.length) {
+      cursorY += 10;
+      const gap = 10;
+      const cardW = (contentW - gap) / 2;
+      const cardH = 80;
+      page.statistics.forEach((stat, index) => {
+        const label = typeof stat === "string" ? stat : stat.label;
+        const value = typeof stat === "string" ? "Coming soon" : stat.value;
+        const detail = typeof stat === "string" ? "" : stat.detail;
+        const x = contentX + (index % 2) * (cardW + gap);
+        const y = cursorY + Math.floor(index / 2) * (cardH + gap);
+        addContent(this.add.rectangle(x + cardW / 2, y + cardH / 2, cardW, cardH, 0x160f0b, 0.88)
+          .setStrokeStyle(1, 0x8b5a2b, 0.78));
+        contentText(x + 12, y + 12, label, {
+          fontFamily: "Arial", fontSize: "12px", fontStyle: "bold", color: "#fcd12a",
+        }).setOrigin(0, 0);
+        contentText(x + 12, y + 32, value, {
+          fontFamily: "Arial", fontSize: "17px", fontStyle: "bold", color: "#f2e4ce",
+        }).setOrigin(0, 0);
+        contentText(x + 12, y + 57, detail, {
+          fontFamily: "Arial", fontSize: "11px", color: "#bfa88a",
+        }).setOrigin(0, 0);
+      });
+      cursorY += Math.ceil(page.statistics.length / 2) * (cardH + gap);
+    }
+
+    if (page.reportText) {
+      cursorY = addCopy("Full simulation report", cursorY + 10, {
+        size: 15,
+        color: "#fcd12a",
+        bold: true,
+      }) + 8;
+      const report = contentText(contentX, cursorY, page.reportText, {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#d8c8b2",
+        lineSpacing: 2,
+        wordWrap: { width: contentW },
+      }).setOrigin(0, 0);
+      cursorY += report.height + 8;
+    }
+
+    this.gameRulesScrollMax = Math.max(0, cursorY - contentY - contentH + 10);
+    this.setGameRulesScroll(retainedScroll);
+    // Keep paging controls outside the masked content container and above every
+    // rules-page object. This makes Next/Previous available even on the long
+    // Main Game paytable page.
+    const floatingButton = (x, y, buttonW, buttonH, label, onClick, active) => {
+      const fill = active ? 0x4b2c1d : 0x21160f;
+      const border = active ? 0xfcd12a : 0x6b4423;
+      const bg = this.add.rectangle(x, y, buttonW, buttonH, fill, active ? 0.98 : 0.58)
+        .setStrokeStyle(1.5, border, 0.9)
+        .setDepth(9004);
+      const text = this.add.text(x, y, label, {
+        fontFamily: "Arial", fontSize: "12px", fontStyle: "bold",
+        color: active ? "#fcd12a" : "#9b836c",
+      }).setOrigin(0.5).setDepth(9005);
+      this.gameRulesElements.push(bg, text);
+      if (!active) return;
+      bg.setInteractive({ useHandCursor: true });
+      bg.on("pointerover", () => bg.setFillStyle(0x684025, 1));
+      bg.on("pointerout", () => bg.setFillStyle(fill, 0.98));
+      bg.on("pointerdown", () => onClick());
+    };
+    const footerY = panelY + panelH - footerH / 2;
+    floatingButton(contentX + 52, footerY, 104, 34, "‹ Previous", () =>
+      this.selectGameRulesSection(this.gameRulesSelectedIndex - 1), this.gameRulesSelectedIndex > 0);
+    const pageCount = this.add.text(panelCenterX, footerY, `${this.gameRulesSelectedIndex + 1} / ${sections.length}`, {
+      fontFamily: "Arial", fontSize: "13px", color: "#d8b68c",
+    }).setOrigin(0.5).setDepth(9005);
+    this.gameRulesElements.push(pageCount);
+    floatingButton(contentX + contentW - 52, footerY, 104, 34, "Next ›", () =>
+      this.selectGameRulesSection(this.gameRulesSelectedIndex + 1), this.gameRulesSelectedIndex < sections.length - 1);
   }
 
   showDialog(msg) {

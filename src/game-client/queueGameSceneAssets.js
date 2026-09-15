@@ -116,6 +116,14 @@ export function queueGameSceneAssets(load, _deps = {}) {
     "assets/giantstomp/sounds/very-loud-eviscerating-bleeding-eviscerating-guts-blood-gore-deleted-user.mp3"
   );
   load.audio("giant_laugh", "assets/giantstomp/sounds/laugh.mp3");
+  load.audio(
+    "ouch_animals_help",
+    "assets/giantstomp/sounds/before ouch scene/help-us-get-us-out-of-here.mp3"
+  );
+  load.audio(
+    "ouch_animals_stomp_reaction",
+    "assets/giantstomp/sounds/before ouch scene/aw-he-stamped-his-little-foot.mp3"
+  );
   load.audio("ouch_stomp1", "assets/giantstomp/sounds/ouch_stomp1.mp3");
   load.audio("ouch_stomp2", "assets/giantstomp/sounds/ouch_stomp2.mp3");
   load.audio("ouch_background-music", "assets/giantstomp/sounds/ouch_background-music.mp3");
@@ -132,10 +140,7 @@ export function queueGameSceneAssets(load, _deps = {}) {
   load.audio("golf_swing", "assets/giantstomp/sounds/swing.mp3");
   load.audio("golf_miss", "assets/giantstomp/sounds/giant_missing_in_golf.mp3");
   load.audio("golf_jackpot_hit", "assets/giantstomp/sounds/giant_hit_jackpot.mp3");
-  load.audio(
-    "unicorn_appear",
-    "assets/giantstomp/sounds/giant-video-game-character-dialogue-vocalization-i-can-smell-you.mp3"
-  );
+  load.audio("unicorn_landing_carnival", "assets/giantstomp/sounds/wins_highlight_carnival.opus");
   load.audio("anger_meter", "assets/giantstomp/sounds/anger_meter.mp3");
   load.audio("bonus_confirm", "assets/giantstomp/sounds/bonus_confirm.mp3");
 }

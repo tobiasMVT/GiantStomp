@@ -195,6 +195,24 @@ test("feature buy super golf swing guarantees unicorn super golfswing", async ()
   assert.ok(!spin.golfswingEvent.jackpotSegments.includes(1));
 });
 
+test("feature buy unicorn landing places a unicorn without starting another feature", async () => {
+  const server = new GameServer({ random: () => 0.5 });
+
+  const states = await server.generateRoundStates({ featureBuyStrategy: "unicornLanding" });
+  const spin = states.find((state) => state.executedAction === "spin");
+
+  assert.ok(spin);
+  assert.equal(spin.roundMeta?.ticket, "unicornLanding");
+  assert.equal(spin.roundMeta?.featureBuy, true);
+  assert.equal(spin.bucket, "unicornLanding");
+  assert.ok(server.findUnicornPositions(spin.reels).length >= 1);
+  assert.equal(spin.golfswingEvent, null);
+  assert.equal(spin.stompEvent, null);
+  assert.equal(spin.crushEvent, null);
+  assert.equal(spin.partyEvent, null);
+  assert.equal(states.some((state) => state.executedAction === "bonustransition"), false);
+});
+
 test("super golf swing entry boards vary between generations", () => {
   const server = new GameServer({ random: Math.random });
   const boards = Array.from({ length: 12 }, () => server.buildGolfswingEntryBoard({ requireUnicorn: true }));

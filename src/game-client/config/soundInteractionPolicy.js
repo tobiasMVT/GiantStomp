@@ -48,6 +48,12 @@ const soundInteractionPolicy = {
   giant_laugh: {
     allowDuringFastForward: false
   },
+  ouch_animals_help: {
+    allowDuringFastForward: false
+  },
+  ouch_animals_stomp_reaction: {
+    allowDuringFastForward: false
+  },
   ouch_stomp1: {
     allowDuringFastForward: false
   },
@@ -75,7 +81,7 @@ const soundInteractionPolicy = {
   golf_miss: {
     allowDuringFastForward: false
   },
-  unicorn_appear: {
+  unicorn_landing_carnival: {
     allowDuringFastForward: false
   },
   anger_meter: {

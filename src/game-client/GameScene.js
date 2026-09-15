@@ -118,6 +118,7 @@ const CONSTRUCTION_SFX = ["construction_1", "construction_2", "construction_3"];
 const ANIMAL_CRUSH_SFX = ["animal_crush_splatter", "animal_crush_gore"];
 const OUCH_STOMP_SFX = ["ouch_stomp1", "ouch_stomp2"];
 const GIANT_PAIN_SFX = ["giant_pain_scream", "giant_pain_scream2"];
+const OUCH_STOMP_REACTION_LEAD_IN_MS = 1500;
 // Normalized thumb/finger gap in each hand texture (0–1). Tune if art shifts.
 const CRUSH_HAND_GRIP = {
   open_hand: { x: 0.91, y: 0.36 },
@@ -285,6 +286,9 @@ export class GameScene extends Phaser.Scene {
     this.activeAngerMeterSfx = null;
     this.activeAngerMeterFadeTween = null;
     this.activeOuchLaughSfx = null;
+    this.activeOuchDialogueSfx = null;
+    this.activeOuchDialoguePromise = null;
+    this.completeOuchDialogue = null;
     this.activeOuchCelebrationSfx = null;
     this.activePartyDiscoMusic = null;
     this.mainThemeSuppressedAfterPartyStomp = false;
@@ -1745,6 +1749,41 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  async presentBonusLifeIntro() {
+    const slots = this.lifeSegments
+      .map((segment, index) => ({ segment, label: this.lifeLabels?.[index], index }))
+      .filter(({ segment, index }) => segment?.visible && index < this.bonusMaxLives);
+    if (!slots.length) return;
+
+    this.playSfx("wins_payout", { volume: 0.18 });
+    await Promise.all(slots.map(({ segment, label, index }) => {
+      const active = segment.lifeActive !== false;
+      const targetAlpha = active ? 1 : 0.74;
+      segment.setAlpha(0).setScale(LIFE_SEGMENT_SCALE * 0.42);
+      label?.setAlpha(0).setScale(0.55);
+      return Promise.all([
+        this.tweenPromise({
+          targets: segment,
+          alpha: targetAlpha,
+          scaleX: LIFE_SEGMENT_SCALE,
+          scaleY: LIFE_SEGMENT_SCALE,
+          duration: 220,
+          delay: index * 95,
+          ease: "Back.easeOut",
+        }),
+        label ? this.tweenPromise({
+          targets: label,
+          alpha: active ? 1 : 0.82,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 180,
+          delay: index * 95 + 24,
+          ease: "Back.easeOut",
+        }) : Promise.resolve(),
+      ]);
+    }));
+  }
+
   layoutDamageMeter() {
     this.layoutDamageMeterChrome();
     if (this.damageMeterOrientation === "bonus") {
@@ -2668,7 +2707,7 @@ export class GameScene extends Phaser.Scene {
           this.playSfx(`land${reel + 1}`, { volume: 0.28 });
         },
         onComplete: () => {
-          this.playUnicornAppearSfxIfNeeded(symbol);
+          this.presentUnicornLandingIfNeeded(symbol, sprite);
           if (this.partyActive) {
             this.addPartyAnimalCheerForSprites([sprite]);
           }
@@ -2724,7 +2763,7 @@ export class GameScene extends Phaser.Scene {
             this.playSfx(`land${reel + 1}`, { volume: 0.28 });
           },
           onComplete: () => {
-            this.playUnicornAppearSfxIfNeeded(symbol);
+            this.presentUnicornLandingIfNeeded(symbol, sprite);
             if (this.partyActive) {
               this.addPartyAnimalCheerForSprites([sprite]);
             }
@@ -2790,7 +2829,11 @@ export class GameScene extends Phaser.Scene {
     await this.dropSymbols(this.buildOuchFakeSpinReels(), {
       getTextureKey: (symbol, reel) => this.getOuchFakeSpinTexture(symbol, reel),
     });
-    await this.waitForPresentation(420, { skippable: true });
+    await this.presentOuchPreStompDialogue();
+  }
+
+  async presentOuchPreStompDialogue() {
+    await this.playOuchDialogueSfx("ouch_animals_help", { volume: 0.86 });
   }
 
   async spinBonusReels(reels) {
@@ -2901,7 +2944,7 @@ export class GameScene extends Phaser.Scene {
         duration: 300,
         delay: index * 28,
         ease: "Cubic.easeInOut",
-        onComplete: () => this.playUnicornAppearSfxIfNeeded(symbol),
+        onComplete: () => this.presentUnicornLandingIfNeeded(symbol, sprite),
       }));
     });
 
@@ -2925,7 +2968,7 @@ export class GameScene extends Phaser.Scene {
           delay: reel * 45 + row * 24,
           ease: SYMBOL_LAND_EASE,
           easeParams: SYMBOL_LAND_EASE_PARAMS,
-          onComplete: () => this.playUnicornAppearSfxIfNeeded(symbol),
+          onComplete: () => this.presentUnicornLandingIfNeeded(symbol, sprite),
         }));
       }
     }
@@ -4819,13 +4862,13 @@ export class GameScene extends Phaser.Scene {
       await Promise.all([
         this.tweenPromise({
           targets: foot,
-          y: footY + 9 + pullNumber * 2,
+          y: footY + 5 + pullNumber * 1.25,
           duration: 105,
           ease: "Quad.easeIn",
         }),
         marker ? this.tweenPromise({
           targets: marker,
-          y: markerY + 7 + pullNumber * 2,
+          y: markerY + 4 + pullNumber,
           duration: 105,
           ease: "Quad.easeIn",
         }) : Promise.resolve(),
@@ -4834,13 +4877,13 @@ export class GameScene extends Phaser.Scene {
       await Promise.all([
         this.tweenPromise({
           targets: foot,
-          y: footY - 5,
+          y: footY - 3,
           duration: 92,
           ease: "Quad.easeOut",
         }),
         marker ? this.tweenPromise({
           targets: marker,
-          y: markerY - 4,
+          y: markerY - 2,
           duration: 92,
           ease: "Quad.easeOut",
         }) : Promise.resolve(),
@@ -5249,6 +5292,7 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.shake(320, 0.018);
     this.playOuchStompSfx();
+    const reactionLeadIn = this.waitForPresentation(OUCH_STOMP_REACTION_LEAD_IN_MS, { skippable: true });
     this.startOuchTheme();
     this.spawnOuchDebrisBurst(bounds.centerX, impactY + CELL_SIZE * 0.12, footWidth * 1.08);
     this.spawnOuchImpactCloud(bounds.centerX, impactY + CELL_SIZE * 0.1, footWidth * 1.12);
@@ -5265,6 +5309,8 @@ export class GameScene extends Phaser.Scene {
     const impact = { foot: snaredFoot, impactY, footWidth, footScale, bounds };
     this.createOuchTrapRig(impact);
     this.layoutTrapPowerTexts(this.trapMeterState?.power ?? 0);
+    await reactionLeadIn;
+    this.playOuchDialogueSfx("ouch_animals_stomp_reaction", { volume: 0.86 });
     return impact;
   }
 
@@ -6125,6 +6171,9 @@ export class GameScene extends Phaser.Scene {
     const bounds = this.getOuchStompBounds();
     const impact = await this.presentOuchStompImpact(bounds);
     if (!impact) return;
+    // Keep the first trap pull and pit descent behind the animals' full
+    // post-impact reaction line.
+    await this.waitForOuchDialogueToFinish();
 
     if (catchUpIndex > 0) {
       const bankedLabel = catchUpIndex === 1 ? "1 BANKED STOMP" : `${catchUpIndex} BANKED STOMPS`;
@@ -7233,7 +7282,10 @@ export class GameScene extends Phaser.Scene {
         );
         projectileAnimal = created.sprite;
         Object.assign(projectileAnimal, { symbolId: UNICORN_SYMBOL });
-        projectileAnimal.setOrigin(0.5, 1).setPosition(teeX, teeY);
+        // The unicorn is a container (to retain its SUPER/BONUS badge), unlike
+        // the normal animal image. Containers have no setOrigin(), so place its
+        // centered image half a scaled texture-height above the tee instead.
+        projectileAnimal.setPosition(teeX, teeY - created.image.height * animalScale * 0.5);
       } else {
         projectileAnimal = this.add.image(0, 0, animalKey)
           .setOrigin(0.5, 1)
@@ -9293,7 +9345,10 @@ export class GameScene extends Phaser.Scene {
     this.updateBonusState(gameState.bonusState, gameState.trapMeter, gameState.damageWheel);
     await this.presentBonusIntroScene();
     this.setBonusUiVisible(true);
-    await this.presentBonusMultiplierLadderIntro();
+    await Promise.all([
+      this.presentBonusLifeIntro(),
+      this.presentBonusMultiplierLadderIntro(),
+    ]);
   }
 
   async presentBonusExitSequence(gameState = {}) {
@@ -9482,8 +9537,72 @@ export class GameScene extends Phaser.Scene {
     this.playUnicornAppearSfx();
   }
 
+  presentUnicornLandingIfNeeded(symbol, sprite) {
+    if (Number(symbol) !== UNICORN_SYMBOL) return;
+    this.playUnicornAppearSfx();
+    if (this.isInBonusMode || this.isPostBonusOuch || !sprite?.active) return;
+
+    const width = CELL_SIZE * 1.45;
+    const height = CELL_SIZE * 1.55;
+    const rainbow = this.add.graphics()
+      .setDepth(DEPTH.symbols - 0.5)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0);
+    if (this.reelMask) rainbow.setMask(this.reelMask);
+    rainbow.fillGradientStyle(0xff3b30, 0xffd166, 0x5ce1ff, 0xc084fc, 0.34, 0.34, 0.34, 0.34);
+    rainbow.fillEllipse(sprite.x, sprite.y - height * 0.08, width, height);
+
+    const sparkles = Array.from({ length: 16 }, (_, index) => {
+      const color = RAINBOW_ANGER_COLORS[index % RAINBOW_ANGER_COLORS.length];
+      const sparkle = this.add.circle(
+        sprite.x + Phaser.Math.Between(-14, 14),
+        sprite.y + Phaser.Math.Between(-10, 14),
+        Phaser.Math.Between(3, 6),
+        color,
+        0.9
+      )
+        .setDepth(DEPTH.symbols - 0.25)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      if (this.reelMask) sparkle.setMask(this.reelMask);
+      return sparkle;
+    });
+
+    this.tweens.add({
+      targets: rainbow,
+      alpha: 0.62,
+      duration: 110,
+      hold: 320,
+      yoyo: true,
+      ease: "Sine.easeOut",
+      onComplete: () => rainbow.destroy(),
+    });
+    sparkles.forEach((sparkle, index) => {
+      this.tweens.add({
+        targets: sparkle,
+        y: sparkle.y - Phaser.Math.Between(64, 118),
+        x: sparkle.x + Phaser.Math.Between(-72, 72),
+        alpha: 0,
+        scaleX: 2.25,
+        scaleY: 2.25,
+        duration: 580,
+        delay: index * 22,
+        ease: "Quad.easeOut",
+        onComplete: () => sparkle.destroy(),
+      });
+    });
+    this.tweenPromise({
+      targets: sprite,
+      y: sprite.y - 10,
+      scaleX: sprite.scaleX * 1.2,
+      scaleY: sprite.scaleY * 1.2,
+      duration: 170,
+      yoyo: true,
+      ease: "Back.easeOut",
+    });
+  }
+
   playUnicornAppearSfx() {
-    this.playSfx("unicorn_appear", { volume: 0.76 });
+    this.playSfx("unicorn_landing_carnival", { volume: 0.72 });
   }
 
   stopOuchLaughSfx() {
@@ -9492,6 +9611,52 @@ export class GameScene extends Phaser.Scene {
     this.activeOuchLaughSfx = null;
     sound.stop();
     sound.destroy();
+  }
+
+  stopOuchDialogueSfx() {
+    const sound = this.activeOuchDialogueSfx;
+    if (!sound) return;
+    this.activeOuchDialogueSfx = null;
+    const complete = this.completeOuchDialogue;
+    this.activeOuchDialoguePromise = null;
+    this.completeOuchDialogue = null;
+    sound.stop();
+    sound.destroy();
+    complete?.();
+  }
+
+  waitForOuchDialogueToFinish() {
+    return this.activeOuchDialoguePromise || Promise.resolve();
+  }
+
+  playOuchDialogueSfx(key, { volume = 0.8 } = {}) {
+    this.stopOuchDialogueSfx();
+    if (!this.sound || !this.cache.audio.exists(key)) return Promise.resolve();
+    if (this.fastForwardRequested && soundInteractionPolicy[key]?.allowDuringFastForward === false) return Promise.resolve();
+
+    const sound = this.sound.add(key, {
+      volume: volume * (this.fastForwardRequested ? 0.55 : 1),
+    });
+    let complete;
+    const completion = new Promise((resolve) => {
+      complete = resolve;
+    });
+    this.activeOuchDialogueSfx = sound;
+    this.activeOuchDialoguePromise = completion;
+    this.completeOuchDialogue = complete;
+    const release = () => {
+      if (this.activeOuchDialogueSfx === sound) {
+        this.activeOuchDialogueSfx = null;
+        this.activeOuchDialoguePromise = null;
+        this.completeOuchDialogue = null;
+        complete();
+      }
+      sound.destroy();
+    };
+    sound.once("complete", release);
+    sound.once("stop", release);
+    if (!sound.play()) release();
+    return completion;
   }
 
   playOuchLaughSfx() {
@@ -9760,10 +9925,39 @@ export class GameScene extends Phaser.Scene {
   }
 
   playOuchStompSfx(volume = 0.82) {
-    this.playSfx(OUCH_STOMP_SFX[0], { volume });
-    this.time?.delayedCall(60, () => {
-      this.playSfx(OUCH_STOMP_SFX[1], { volume: volume * 0.95 });
+    const playOneShot = (key, soundVolume) => new Promise((resolve) => {
+      if (!this.sound || !this.cache.audio.exists(key)) {
+        resolve();
+        return;
+      }
+      if (this.fastForwardRequested && soundInteractionPolicy[key]?.allowDuringFastForward === false) {
+        resolve();
+        return;
+      }
+      const sound = this.sound.add(key, {
+        volume: soundVolume * (this.fastForwardRequested ? 0.55 : 1),
+      });
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        sound.destroy();
+        resolve();
+      };
+      sound.once("complete", release);
+      sound.once("stop", release);
+      if (!sound.play()) release();
     });
+    const firstStomp = playOneShot(OUCH_STOMP_SFX[0], volume);
+    const secondStomp = new Promise((resolve) => {
+      const startSecondStomp = () => playOneShot(OUCH_STOMP_SFX[1], volume * 0.95).then(resolve);
+      if (this.time) {
+        this.time.delayedCall(60, startSecondStomp);
+      } else {
+        startSecondStomp();
+      }
+    });
+    return Promise.all([firstStomp, secondStomp]);
   }
 
   playGiantPainSfx() {
@@ -9902,6 +10096,7 @@ export class GameScene extends Phaser.Scene {
 
   stopOuchTheme() {
     this.stopOuchLaughSfx();
+    this.stopOuchDialogueSfx();
     this.stopOuchCelebrationSfx();
     this.ouchTheme?.stop();
     this.ouchTheme = null;

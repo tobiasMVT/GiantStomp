@@ -101,6 +101,7 @@ loops until a natural stomp is found.
 - `waysWin`: a paid spin containing a ways win.
 - `bonusEntry`: a paid spin that forces crushed animals and guaranteed bonus entry.
 - `golfswingEntry` / `superGolfswingEntry`: dev and Bet+ golf swing entry (super forces unicorn pick + super jackpot table).
+- `unicornLanding`: dev and Bet+ visual-test spin that lands one Unicorn on the main board without triggering golf swing, a stomp/crush, party, or bonus.
 
 The forced-outcome development endpoints remain compatible with these strategy and
 ticket names.

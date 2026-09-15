@@ -9,7 +9,8 @@
       { "strategyId": "partyEntry", "label": "Party", "cost": 29 },
       { "strategyId": "superBonusEntry", "label": "Super Bonus", "cost": 166 },
       { "strategyId": "golfswingEntry", "label": "Golf Swing", "cost": 7 },
-      { "strategyId": "superGolfswingEntry", "label": "Super Golf Swing", "cost": 70 }
+      { "strategyId": "superGolfswingEntry", "label": "Super Golf Swing", "cost": 70 },
+      { "strategyId": "unicornLanding", "label": "Unicorn Landing", "cost": 1 }
     ]
   },
   "wincap": 10000,
@@ -190,7 +191,7 @@
     "1": 4,
     "2": 6,
     "3": 8,
-    "4": 10,
+    "4": 11,
     "5": 23,
     "6": 75
   },
@@ -246,7 +247,7 @@
     "guaranteedPowerSeedSymbols": [111, 222, 333, 444, 555]
   },
   "maxCascadesPerSpin": 100,
-  "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "superBonusEntry", "stompEntry", "crushEntry", "partyEntry", "golfswingEntry", "superGolfswingEntry"],
+  "ticketStrategies": ["normal", "noWin", "waysWin", "bonusEntry", "superBonusEntry", "stompEntry", "crushEntry", "partyEntry", "golfswingEntry", "superGolfswingEntry", "unicornLanding"],
   "normal": {
     "noWin": 2,
     "random_min0_max500": 0,
@@ -281,6 +282,9 @@
   },
   "superGolfswingEntry": {
     "superGolfswingEntry": 1
+  },
+  "unicornLanding": {
+    "unicornLanding": 1
   },
   "gameState": {
     "bucket": "normal",

@@ -415,7 +415,7 @@ class GameRuntime {
   }
 
   handlePaytableRequested() {
-    console.log("Paytable requested");
+    this.uiScene?.showGameRules?.();
   }
 
   handleLayoutDebugToggled(forceEnabled) {
