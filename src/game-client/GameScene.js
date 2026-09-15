@@ -372,6 +372,7 @@ export class GameScene extends Phaser.Scene {
     };
     this.ouchLayoutTuner = null;
     this.ouchLayoutTunerKeyHandler = null;
+    this.pauseKeyHandler = null;
     this.mainGameSpeedSettingIndex = 0;
     this.mainGameSpeedControl = [];
     this.mainGameSpeedButton = null;
@@ -384,6 +385,8 @@ export class GameScene extends Phaser.Scene {
     this.ensureCoinAnimation();
     this.applyLayoutSnapshot();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.applyLayoutSnapshot, this);
+    this.pauseKeyHandler = this.handlePauseKeyDown.bind(this);
+    this.input.keyboard?.on("keydown-P", this.pauseKeyHandler);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.emitLayoutContentBounds();
     if (this.isOuchLayoutTunerRequested()) {
@@ -393,6 +396,8 @@ export class GameScene extends Phaser.Scene {
 
   shutdown() {
     this.scale.off(Phaser.Scale.Events.RESIZE, this.applyLayoutSnapshot, this);
+    this.input.keyboard?.off("keydown-P", this.pauseKeyHandler);
+    this.pauseKeyHandler = null;
     this.unsubscribeLayout?.();
     this.unsubscribeLayoutDebug?.();
     this.cancelSkippablePresentationWaits();
@@ -1747,6 +1752,19 @@ export class GameScene extends Phaser.Scene {
       this.damageMeterIntroComplete = true;
       this.applyDamageMeterHighlight(this.damageMeterActiveIndex ?? 0);
     }
+  }
+
+  handlePauseKeyDown(event) {
+    if (event?.repeat || this.isEditableElementFocused()) return;
+    this.eventBus?.emit("intent:pauseToggled");
+  }
+
+  isEditableElementFocused() {
+    if (typeof document === "undefined") return false;
+    const activeElement = document.activeElement;
+    if (!activeElement) return false;
+    return activeElement.isContentEditable
+      || ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName);
   }
 
   async presentBonusLifeIntro() {
@@ -10127,6 +10145,7 @@ export class GameScene extends Phaser.Scene {
     if (timers) {
       this.time.paused = true;
       this.tweens.pauseAll();
+      this.anims.pauseAll();
     }
     if (audio) this.sound.pauseAll();
   }
@@ -10134,6 +10153,7 @@ export class GameScene extends Phaser.Scene {
   resumeGame({ audio = true } = {}) {
     this.time.paused = false;
     this.tweens.resumeAll();
+    this.anims.resumeAll();
     if (audio) this.sound.resumeAll();
   }
 }
