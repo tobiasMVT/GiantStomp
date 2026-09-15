@@ -184,6 +184,9 @@ const GOLF_JACKPOT_MUSIC_DURATION_MS = 9000;
 const GOLF_JACKPOT_WIN_HIGHLIGHT_MS = 760;
 const GOLF_JACKPOT_DRUM_START_MS = 5000;
 const GOLF_JACKPOT_WHEEL_CONSTANT_SPIN_ROTATION = 0.84;
+// giant_golfswing.png has transparent padding; club head tip is leftmost in lower art.
+const GOLF_SWING_CLUB_ORIGIN = { x: 16 / 1024, y: 1165 / 1535 };
+const GOLF_SWING_GIANT_HEIGHT_FACTOR = 0.92 * 3 * 0.75;
 const UNICORN_SYMBOL = 14;
 const BONUS_TRAP_POWER_FONT_SIZE = 26;
 const OUCH_TRAP_POWER_FONT_SIZE = 25;
@@ -675,6 +678,9 @@ export class GameScene extends Phaser.Scene {
     this.crushBackground = this.add.image(x, y, "crush_giant_bg")
       .setDepth(DEPTH.crushBackground)
       .setAlpha(0);
+    this.golfhatBackground = this.add.image(x, y, "golfhat_giant")
+      .setDepth(DEPTH.crushBackground)
+      .setAlpha(0);
     this.bonusBackground = this.add.image(x, y + BONUS_BACKGROUND_OFFSET_Y, "bonus_background")
       .setDepth(DEPTH.background)
       .setAlpha(0);
@@ -684,7 +690,7 @@ export class GameScene extends Phaser.Scene {
     this.totalWinBackground = this.add.image(x, y, "total_win_background")
       .setDepth(DEPTH.background)
       .setAlpha(0);
-    [this.background, this.crushBackground, this.bonusBackground, this.totalWinBackground].forEach((image) => {
+    [this.background, this.crushBackground, this.golfhatBackground, this.bonusBackground, this.totalWinBackground].forEach((image) => {
       this.layoutBackgroundImage(image);
     });
     this.layoutBackgroundImage(this.ouchBackground, OUCH_BACKGROUND_SCALE);
@@ -6609,6 +6615,37 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  async showGolfhatGiantBackground(duration = 520) {
+    const bg = this.golfhatBackground;
+    if (!bg) return;
+    const peekX = GRID_OFFSET_X + GRID_WIDTH_PX * 0.84;
+    const peekY = GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.04;
+    bg.setPosition(peekX, peekY);
+    this.layoutBackgroundImage(bg);
+    const peekScale = bg.scaleX * 0.48;
+    bg.setScale(peekScale);
+
+    await this.tweenPromise({ targets: bg, alpha: 1, duration, ease: "Quad.easeInOut" });
+  }
+
+  async hideGolfhatGiantBackground(duration = 400) {
+    const bg = this.golfhatBackground;
+    if (!bg) return;
+    const centerX = GRID_OFFSET_X + GRID_WIDTH_PX / 2;
+    const centerY = GRID_OFFSET_Y + GRID_HEIGHT_PX / 2;
+
+    await this.tweenPromise({
+      targets: bg,
+      alpha: 0,
+      duration,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        this.layoutBackgroundImage(bg);
+        bg.setPosition(centerX, centerY);
+      },
+    });
+  }
+
   async presentMiniSqueezeShake(targets, durationMs = 300) {
     const items = (Array.isArray(targets) ? targets : [targets]).filter(Boolean);
     if (!items.length) return;
@@ -7094,7 +7131,7 @@ export class GameScene extends Phaser.Scene {
     const fast = this.fastForwardRequested;
 
     this.playGolfFeatureStartMusic();
-    await this.showCrushGiantBackground(fast ? 180 : 520);
+    await this.showGolfhatGiantBackground(fast ? 180 : 520);
     await this.waitForPresentation(
       fast ? 90 : Math.max(750, Number(event.teaseMs) || 700),
       { skippable: !fast }
@@ -7143,7 +7180,7 @@ export class GameScene extends Phaser.Scene {
       },
     });
 
-    await this.hideCrushGiantBackground(fast ? 160 : 320);
+    await this.hideGolfhatGiantBackground(fast ? 160 : 320);
   }
 
   async presentGolfswingSceneTransition(event = {}) {
@@ -7157,49 +7194,76 @@ export class GameScene extends Phaser.Scene {
     ]);
 
     const overlay = this.add.container(0, 0).setDepth(DEPTH.golfswingOverlay);
-    const label = this.add.text(
-      GAME_LOGICAL_WIDTH - 18,
-      24,
-      "goldswingBackground",
-      {
-        fontFamily: "Arial",
-        fontSize: "18px",
-        color: "#c8e6ff",
-        stroke: "#0a1420",
-        strokeThickness: 3,
-      }
-    ).setOrigin(1, 0);
-    overlay.add(label);
 
     const cell = event.pickedCell || {};
     const animalKey = this.getAnimalEmotionTexture(cell.symbol) || String(cell.symbol);
+    // giant_golfswing art: club-head tip origin aligns to clubHead; animal sits left of club.
+    const teeX = GAME_LOGICAL_WIDTH * 0.42;
+    const teeY = GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.58;
+    const clubHeadX = teeX + 18;
+    const clubHeadY = teeY - 36;
+    const animalScale = SYMBOL_SCALE * 0.2;
     let projectileAnimal = null;
+    let giantSwing = null;
+
+    if (this.textures.exists("giant_golfswing")) {
+      giantSwing = this.add.image(0, 0, "giant_golfswing");
+      const giantScale = (GAME_LOGICAL_HEIGHT * GOLF_SWING_GIANT_HEIGHT_FACTOR) / giantSwing.height;
+      giantSwing
+        .setOrigin(GOLF_SWING_CLUB_ORIGIN.x, GOLF_SWING_CLUB_ORIGIN.y)
+        .setScale(giantScale)
+        .setPosition(clubHeadX, clubHeadY)
+        .setAlpha(0)
+        .setDepth(DEPTH.golfswingFx + 0.2);
+      this.golfswingObjects.push(giantSwing);
+    }
+
     if (this.textures.exists(animalKey)) {
       if (Number(cell.symbol) === UNICORN_SYMBOL) {
         const created = this.createUnicornSymbolContainer(
-          GAME_LOGICAL_WIDTH * 0.72,
-          GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
+          0,
+          0,
           animalKey,
           {
-            scale: SYMBOL_SCALE * 0.22,
-            alpha: 0.75,
-            depth: DEPTH.golfswingFx + 0.5,
+            scale: animalScale,
+            alpha: 0,
+            depth: DEPTH.golfswingFx + 0.7,
             mask: null,
           }
         );
         projectileAnimal = created.sprite;
         Object.assign(projectileAnimal, { symbolId: UNICORN_SYMBOL });
+        projectileAnimal.setOrigin(0.5, 1).setPosition(teeX, teeY);
       } else {
-        projectileAnimal = this.add.image(
-          GAME_LOGICAL_WIDTH * 0.72,
-          GRID_OFFSET_Y + GRID_HEIGHT_PX * 0.28,
-          animalKey
-        )
-          .setScale(SYMBOL_SCALE * 0.22)
-          .setAlpha(0.75)
-          .setDepth(DEPTH.golfswingFx + 0.5);
+        projectileAnimal = this.add.image(0, 0, animalKey)
+          .setOrigin(0.5, 1)
+          .setScale(animalScale)
+          .setPosition(teeX, teeY)
+          .setAlpha(0)
+          .setDepth(DEPTH.golfswingFx + 0.7);
       }
       this.golfswingObjects.push(projectileAnimal);
+    }
+
+    const introTargets = [giantSwing, projectileAnimal].filter(Boolean);
+    if (introTargets.length) {
+      await this.tweenPromise({
+        targets: introTargets,
+        alpha: 1,
+        duration: fast ? 200 : 480,
+        ease: "Quad.easeOut",
+      });
+      await this.waitForPresentation(fast ? 350 : 850, { skippable: true });
+    }
+
+    if (giantSwing?.active) {
+      await this.tweenPromise({
+        targets: giantSwing,
+        alpha: 0,
+        duration: fast ? 180 : 420,
+        ease: "Quad.easeIn",
+      });
+      giantSwing.destroy();
     }
 
     this.golfswingObjects.push(overlay);
@@ -7222,41 +7286,49 @@ export class GameScene extends Phaser.Scene {
       event.crosshairEndY ?? event.crosshairY ?? zone.y
     );
     const startPos = this.golfswingNormToScreen(0.2, 0.62);
-    const introEnd = fast ? 0.14 : 0.16;
+    const introEnd = fast ? 0.12 : 0.14;
     const loopCount = fast ? 2 : Phaser.Math.Between(2, 3);
     const orbitDir = Math.random() < 0.5 ? -1 : 1;
-    const swing = Phaser.Math.FloatBetween(0.28, 0.4);
-    const endNormX = (endPos.x - zoneCenter.x) / zoneRadii.x;
-    const endNormY = (endPos.y - zoneCenter.y) / zoneRadii.y;
-    const landingAngle = Math.atan2(endNormY, endNormX);
-    const landingRadius = Math.hypot(endNormX, endNormY);
+    const swing = Phaser.Math.FloatBetween(0.34, 0.5);
     const loopEases = Array.from({ length: loopCount }, () => {
       const easePool = this.getGolfswingEasePool();
       return easePool.length ? Phaser.Math.RND.pick(easePool) : Phaser.Math.Easing.Linear;
     });
 
-    const getCurvePoint = (curveT) => {
-      const travel = 1 - curveT;
-      const angle = landingAngle - orbitDir * travel * loopCount * Math.PI * 2;
-      const radiusNorm = landingRadius + swing * Math.sin(travel * loopCount * Math.PI * 2);
+    const getOpenArcPoint = (curveT) => {
+      const easedT = this.remapGolfswingSegmentEase(curveT, loopCount, loopEases);
+      const baseX = Phaser.Math.Linear(startPos.x, endPos.x, easedT);
+      const baseY = Phaser.Math.Linear(startPos.y, endPos.y, easedT);
+      const dx = endPos.x - startPos.x;
+      const dy = endPos.y - startPos.y;
+      const chordLen = Math.max(1, Math.hypot(dx, dy));
+      const perpX = (-dy / chordLen) * orbitDir;
+      const perpY = (dx / chordLen) * orbitDir;
+      const envelope = Math.sin(Math.PI * easedT);
+      const phase = easedT * loopCount * Math.PI * 2;
+      const wave = Math.sin(phase) + 0.42 * Math.sin(phase * 2 + 0.55);
+      const offset = envelope * swing * zoneRadiusPx * wave;
+
       return {
-        x: zoneCenter.x + Math.cos(angle) * zoneRadii.x * radiusNorm,
-        y: zoneCenter.y + Math.sin(angle) * zoneRadii.y * radiusNorm,
+        x: baseX + perpX * offset,
+        y: baseY + perpY * offset,
       };
     };
 
     const getAimPoint = (t) => {
       if (t <= introEnd) {
         const u = (Phaser.Math.Easing.Cubic?.Out || Phaser.Math.Easing.Linear)(t / introEnd);
-        const pathStart = getCurvePoint(0);
+        const introFrom = {
+          x: startPos.x - zoneRadiusPx * 0.08,
+          y: startPos.y + zoneRadiusPx * 0.12,
+        };
         return {
-          x: Phaser.Math.Linear(startPos.x, pathStart.x, u),
-          y: Phaser.Math.Linear(startPos.y, pathStart.y, u),
+          x: Phaser.Math.Linear(introFrom.x, startPos.x, u),
+          y: Phaser.Math.Linear(introFrom.y, startPos.y, u),
         };
       }
-      const curveT = (t - introEnd) / (1 - introEnd);
-      const easedCurveT = this.remapGolfswingSegmentEase(curveT, loopCount, loopEases);
-      return getCurvePoint(easedCurveT);
+      const arcT = (t - introEnd) / (1 - introEnd);
+      return getOpenArcPoint(arcT);
     };
 
     const {
@@ -7264,6 +7336,13 @@ export class GameScene extends Phaser.Scene {
       hitZoneGfx,
       hitZoneRing,
     } = this.createGolfswingGreen(zoneCenter, zoneRadii);
+    greenContainer.setAlpha(0);
+    await this.tweenPromise({
+      targets: greenContainer,
+      alpha: 1,
+      duration: fast ? 180 : 360,
+      ease: "Quad.easeOut",
+    });
 
     const crosshair = this.add.container(startPos.x, startPos.y).setDepth(DEPTH.golfswingFx + 1);
     crosshair.add([

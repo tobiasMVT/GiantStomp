@@ -7,17 +7,17 @@ const DEFAULT_THEME = {
   secondary: { bg: 0x14141e, bgAlpha: 0.85, border: 0x555577, hover: 0x22223a, hoverAlpha: 0.95, text: "#a7b8ca" },
   utility:   { bg: 0x14141e, bgAlpha: 0.7, border: 0x3a3a50, hover: 0x22223a, hoverAlpha: 0.85, text: "#a7b8ca" },
   disabled:  { bg: 0x111118, bgAlpha: 0.6, border: 0x333344, text: "#666688" },
-  autoplayActive: { bg: 0x0f2a0f, bgAlpha: 0.9, border: 0x44cc44 },
+  autoplayActive: { bg: 0x0f2a0f, bgAlpha: 0.9, border: 0x44cc44, text: "#44cc44" },
   picker: {
     bg: 0x0a0a14, bgAlpha: 0.94, border: 0x555577,
     chipActive:   { bg: 0x2a1800, bgAlpha: 0.95, border: 0xffd700, text: "#ffd700" },
     chipInactive: { bg: 0x14141e, bgAlpha: 0.8, border: 0x555577, text: "#a7b8ca" },
   },
-  secondaryBar:  { bg: 0x080810, bgAlpha: 0.78 },
+  secondaryBar:  { bg: 0x080810, bgAlpha: 0.78, text: "#ffffff" },
   regulatoryBar: { bg: 0x050508, bgAlpha: 0.85, text: "#8fa3bc" },
   dialog: {
     overlay: { color: 0x000000, alpha: 0.65 },
-    panel:   { bg: 0x0a0a14, bgAlpha: 0.95, border: 0x555577 },
+    panel:   { bg: 0x0a0a14, bgAlpha: 0.95, border: 0x555577, titleText: "#ffd700", bodyText: "#a7b8ca" },
   },
 };
 
@@ -207,6 +207,15 @@ export class UIScene extends Phaser.Scene {
     return fallback;
   }
 
+  getPickerChipStyle(isActive, enabled = true) {
+    if (!enabled) {
+      const dis = this.theme.disabled;
+      return { bg: dis.bg, bgAlpha: dis.bgAlpha, border: dis.border, text: dis.text };
+    }
+    const chip = isActive ? this.theme.picker.chipActive : this.theme.picker.chipInactive;
+    return { bg: chip.bg, bgAlpha: chip.bgAlpha, border: chip.border, text: chip.text };
+  }
+
   normalizeBitmapText(value) {
     return String(value ?? "").replace(/\u221E/g, "INF");
   }
@@ -368,7 +377,7 @@ export class UIScene extends Phaser.Scene {
       depth: 1000,
       style: {
         fontFamily: "Arial",
-        color: "#a7b8ca",
+        color: this.theme.secondaryBar.text ?? "#ffffff",
         stroke: "#000000",
         strokeThickness: 3
       }
@@ -402,7 +411,7 @@ export class UIScene extends Phaser.Scene {
       style: {
         fontFamily: "Arial",
         fontStyle: "bold",
-        color: "#ffd700",
+        color: this.theme.primary.text,
         stroke: "#000000",
         strokeThickness: 3
       }
@@ -1245,7 +1254,7 @@ export class UIScene extends Phaser.Scene {
       const c = { bg: apTheme.bg, bgA: apTheme.bgAlpha, border: apTheme.border };
       btn.setData("colors", c);
       if (gfx) this.drawRoundedButton(gfx, btnW, btnH, c.bg, c.bgA, c.border);
-      this.setLabelColor(text, "#44cc44");
+      this.setLabelColor(text, apTheme.text ?? "#44cc44");
     } else {
       const s = btn.getData("style");
       const c = { bg: s?.bgColor ?? sec.bg, bgA: s?.bgAlpha ?? sec.bgAlpha, border: s?.borderColor ?? sec.border };
@@ -1550,9 +1559,10 @@ export class UIScene extends Phaser.Scene {
     const pad = 8;
     const panelW = chipW + pad * 2;
     const panelH = options.length * (chipH + gap) - gap + pad * 2;
+    const pickerTheme = this.theme.picker;
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a14, 0.94)
-      .setStrokeStyle(1.5, 0x555577, 0.7)
+    const bg = this.add.rectangle(0, 0, panelW, panelH, pickerTheme.bg, pickerTheme.bgAlpha)
+      .setStrokeStyle(1.5, pickerTheme.border, 0.7)
       .setOrigin(1, 0);
     container.add(bg);
 
@@ -1562,18 +1572,19 @@ export class UIScene extends Phaser.Scene {
       const isActive = strategy.id === activeId;
       const cx = -panelW + pad + chipW / 2;
       const cy = pad + i * (chipH + gap) + chipH / 2;
+      const chipStyle = this.getPickerChipStyle(isActive);
       const chipBg = this.add.rectangle(
         cx,
         cy,
         chipW,
         chipH,
-        isActive ? 0x2a1800 : 0x14141e,
-        isActive ? 0.95 : 0.8
-      ).setStrokeStyle(1.5, isActive ? 0xffd700 : 0x555577, 0.8)
+        chipStyle.bg,
+        chipStyle.bgAlpha
+      ).setStrokeStyle(1.5, chipStyle.border, 0.8)
         .setInteractive({ useHandCursor: true });
       const chipText = this.crispText(cx, cy, strategy.label, {
         fontSize: "14px",
-        color: isActive ? "#ffd700" : "#a7b8ca",
+        color: chipStyle.text,
         fontFamily: "Arial",
         fontStyle: isActive ? "bold" : "normal"
       });
@@ -1581,9 +1592,9 @@ export class UIScene extends Phaser.Scene {
         this.eventBus?.emit("intent:ticketStrategySelected", strategy.id);
         this.closeDevStrategyPicker();
       });
-      chipBg.on("pointerover", () => chipBg.setFillStyle(0x22223a, 0.95));
+      chipBg.on("pointerover", () => chipBg.setFillStyle(this.theme.secondary.hover, this.theme.secondary.hoverAlpha));
       chipBg.on("pointerout", () =>
-        chipBg.setFillStyle(isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8)
+        chipBg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha)
       );
 
       container.add([chipBg, chipText]);
@@ -1644,9 +1655,10 @@ export class UIScene extends Phaser.Scene {
     const activeId = this.viewModel?.ticketStrategy;
     this._devStrategyChips.forEach(({ id, bg, text }) => {
       const isActive = id === activeId;
-      bg.setFillStyle(isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8);
-      bg.setStrokeStyle(1.5, isActive ? 0xffd700 : 0x555577, 0.8);
-      text.setColor(isActive ? "#ffd700" : "#a7b8ca");
+      const chipStyle = this.getPickerChipStyle(isActive);
+      bg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha);
+      bg.setStrokeStyle(1.5, chipStyle.border, 0.8);
+      text.setColor(chipStyle.text);
       text.setFontStyle(isActive ? "bold" : "normal");
     });
   }
@@ -1920,9 +1932,10 @@ export default gameClientConfig;
     const maxCols = Math.max(...rowItems);
     const panelW = maxCols * (chipW + gap) - gap + pad * 2;
     const panelH = rows * (chipH + gap) - gap + pad * 2;
+    const pickerTheme = this.theme.picker;
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a14, 0.94)
-      .setStrokeStyle(1.5, 0x555577, 0.7)
+    const bg = this.add.rectangle(0, 0, panelW, panelH, pickerTheme.bg, pickerTheme.bgAlpha)
+      .setStrokeStyle(1.5, pickerTheme.border, 0.7)
       .setOrigin(0.5, 1);
     container.add(bg);
 
@@ -1936,22 +1949,21 @@ export default gameClientConfig;
         const cx = rowStartX + c * (chipW + gap);
         const cy = -panelH + pad + row * (chipH + gap) + chipH / 2;
         const isActive = bet === this.viewModel?.betSize;
+        const chipStyle = this.getPickerChipStyle(isActive);
         const chipBg = this.add.rectangle(cx, cy, chipW, chipH,
-          isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8
-        ).setStrokeStyle(1.5, isActive ? 0xffd700 : 0x555577, 0.8)
+          chipStyle.bg, chipStyle.bgAlpha
+        ).setStrokeStyle(1.5, chipStyle.border, 0.8)
           .setInteractive({ useHandCursor: true });
         const chipText = this.crispText(cx, cy, String(bet), {
-          fontSize: "15px", color: isActive ? "#ffd700" : "#a7b8ca", fontFamily: "Arial",
+          fontSize: "15px", color: chipStyle.text, fontFamily: "Arial",
           fontStyle: isActive ? "bold" : "normal"
         });
         chipBg.on("pointerdown", () => {
           this.eventBus?.emit("intent:betSelected", bet);
           this.closeBetPicker();
         });
-        chipBg.on("pointerover", () => chipBg.setFillStyle(0x22223a, 0.95));
-        chipBg.on("pointerout", () => chipBg.setFillStyle(
-          isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8
-        ));
+        chipBg.on("pointerover", () => chipBg.setFillStyle(this.theme.secondary.hover, this.theme.secondary.hoverAlpha));
+        chipBg.on("pointerout", () => chipBg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha));
         container.add([chipBg, chipText]);
         this._betChips.push({ bet, bg: chipBg, text: chipText });
       }
@@ -2020,9 +2032,10 @@ export default gameClientConfig;
     const panelW = chipW + pad * 2;
     const panelH = options.length * (chipH + gap) - gap + pad * 2;
     const balance = Number(this.viewModel?.balance) || 0;
+    const pickerTheme = this.theme.picker;
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a14, 0.94)
-      .setStrokeStyle(1.5, 0x555577, 0.7)
+    const bg = this.add.rectangle(0, 0, panelW, panelH, pickerTheme.bg, pickerTheme.bgAlpha)
+      .setStrokeStyle(1.5, pickerTheme.border, 0.7)
       .setOrigin(0.5, 1);
     container.add(bg);
 
@@ -2031,14 +2044,15 @@ export default gameClientConfig;
       const isArmed = this.viewModel?.armedFeatureBuy?.strategyId === option.strategyId;
       const cx = -panelW / 2 + pad + chipW / 2;
       const cy = -panelH + pad + i * (chipH + gap) + chipH / 2;
+      const chipStyle = this.getPickerChipStyle(isArmed, canAfford);
       const chipBg = this.add.rectangle(
         cx,
         cy,
         chipW,
         chipH,
-        isArmed ? 0x2a1800 : (canAfford ? 0x14141e : 0x111118),
-        isArmed ? 0.95 : (canAfford ? 0.8 : 0.55)
-      ).setStrokeStyle(1.5, isArmed ? 0xffd700 : (canAfford ? 0x555577 : 0x333344), 0.8);
+        chipStyle.bg,
+        chipStyle.bgAlpha
+      ).setStrokeStyle(1.5, chipStyle.border, 0.8);
 
       if (canAfford) {
         chipBg.setInteractive({ useHandCursor: true });
@@ -2046,7 +2060,7 @@ export default gameClientConfig;
 
       const chipText = this.crispText(cx, cy, `${option.label} (${option.cost})`, {
         fontSize: "14px",
-        color: isArmed ? "#ffd700" : (canAfford ? "#a7b8ca" : "#666688"),
+        color: chipStyle.text,
         fontFamily: "Arial",
         fontStyle: isArmed ? "bold" : "normal"
       });
@@ -2060,11 +2074,8 @@ export default gameClientConfig;
           });
           this.closeFeatureBuyPicker();
         });
-        chipBg.on("pointerover", () => chipBg.setFillStyle(isArmed ? 0x3a2800 : 0x22223a, 0.95));
-        chipBg.on("pointerout", () => chipBg.setFillStyle(
-          isArmed ? 0x2a1800 : 0x14141e,
-          isArmed ? 0.95 : 0.8
-        ));
+        chipBg.on("pointerover", () => chipBg.setFillStyle(this.theme.secondary.hover, this.theme.secondary.hoverAlpha));
+        chipBg.on("pointerout", () => chipBg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha));
       }
 
       container.add([chipBg, chipText]);
@@ -2156,9 +2167,10 @@ export default gameClientConfig;
     const currentBet = this.viewModel?.betSize;
     this._betChips.forEach(({ bet, bg, text }) => {
       const isActive = bet === currentBet;
-      bg.setFillStyle(isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8);
-      bg.setStrokeStyle(1.5, isActive ? 0xffd700 : 0x555577, 0.8);
-      text.setColor(isActive ? "#ffd700" : "#a7b8ca");
+      const chipStyle = this.getPickerChipStyle(isActive);
+      bg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha);
+      bg.setStrokeStyle(1.5, chipStyle.border, 0.8);
+      text.setColor(chipStyle.text);
       text.setFontStyle(isActive ? "bold" : "normal");
     });
   }
@@ -2200,9 +2212,10 @@ export default gameClientConfig;
     const pad = 8;
     const panelW = options.length * (chipW + gap) - gap + pad * 2;
     const panelH = chipH + pad * 2;
+    const pickerTheme = this.theme.picker;
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a14, 0.94)
-      .setStrokeStyle(1.5, 0x555577, 0.7)
+    const bg = this.add.rectangle(0, 0, panelW, panelH, pickerTheme.bg, pickerTheme.bgAlpha)
+      .setStrokeStyle(1.5, pickerTheme.border, 0.7)
       .setOrigin(0.5, 1);
     container.add(bg);
 
@@ -2213,22 +2226,21 @@ export default gameClientConfig;
       const cx = -panelW / 2 + pad + i * (chipW + gap) + chipW / 2;
       const cy = -panelH + pad + chipH / 2;
       const isActive = currentAp === "on" && currentCount === count;
+      const chipStyle = this.getPickerChipStyle(isActive);
       const chipBg = this.add.rectangle(cx, cy, chipW, chipH,
-        isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8
-      ).setStrokeStyle(1.5, isActive ? 0xffd700 : 0x555577, 0.8)
+        chipStyle.bg, chipStyle.bgAlpha
+      ).setStrokeStyle(1.5, chipStyle.border, 0.8)
         .setInteractive({ useHandCursor: true });
       const chipText = this.crispText(cx, cy, labels[i], {
-        fontSize: "15px", color: isActive ? "#ffd700" : "#a7b8ca", fontFamily: "Arial",
+        fontSize: "15px", color: chipStyle.text, fontFamily: "Arial",
         fontStyle: isActive ? "bold" : "normal"
       });
       chipBg.on("pointerdown", () => {
         this.eventBus?.emit("intent:autoplaySet", count);
         this.closeAutoplayPicker();
       });
-      chipBg.on("pointerover", () => chipBg.setFillStyle(0x22223a, 0.95));
-      chipBg.on("pointerout", () => chipBg.setFillStyle(
-        isActive ? 0x2a1800 : 0x14141e, isActive ? 0.95 : 0.8
-      ));
+      chipBg.on("pointerover", () => chipBg.setFillStyle(this.theme.secondary.hover, this.theme.secondary.hoverAlpha));
+      chipBg.on("pointerout", () => chipBg.setFillStyle(chipStyle.bg, chipStyle.bgAlpha));
       container.add([chipBg, chipText]);
     });
 
@@ -2271,8 +2283,14 @@ export default gameClientConfig;
 
       const { width, height } = this.scale;
       const dialogElements = [];
+      const dialogTheme = this.theme.dialog;
+      const panelTheme = dialogTheme.panel;
+      const pri = this.theme.primary;
 
-      const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65)
+      const overlay = this.add.rectangle(
+        width / 2, height / 2, width, height,
+        dialogTheme.overlay.color, dialogTheme.overlay.alpha
+      )
         .setDepth(2000)
         .setInteractive();
       dialogElements.push(overlay);
@@ -2282,19 +2300,19 @@ export default gameClientConfig;
       const panelX = width / 2;
       const panelY = height / 2;
 
-      const panel = this.add.rectangle(panelX, panelY, panelW, panelH, 0x0a0a14, 0.95)
-        .setStrokeStyle(2, 0x555577, 0.85)
+      const panel = this.add.rectangle(panelX, panelY, panelW, panelH, panelTheme.bg, panelTheme.bgAlpha)
+        .setStrokeStyle(2, panelTheme.border, 0.85)
         .setDepth(2001);
       dialogElements.push(panel);
 
       const title = this.add.text(panelX, panelY - panelH / 2 + 24, msg.title || "Notice", {
-        fontSize: "20px", color: "#ffd700", fontFamily: "Arial", fontStyle: "bold",
+        fontSize: "20px", color: panelTheme.titleText ?? pri.text, fontFamily: "Arial", fontStyle: "bold",
         stroke: "#000000", strokeThickness: 3
       }).setOrigin(0.5, 0).setDepth(2002);
       dialogElements.push(title);
 
       const body = this.add.text(panelX, panelY - 10, msg.body || "", {
-        fontSize: "15px", color: "#a7b8ca", fontFamily: "Arial",
+        fontSize: "15px", color: panelTheme.bodyText ?? this.theme.secondary.text, fontFamily: "Arial",
         stroke: "#000000", strokeThickness: 2,
         wordWrap: { width: panelW - 40 }, align: "center"
       }).setOrigin(0.5).setDepth(2002);
@@ -2309,16 +2327,16 @@ export default gameClientConfig;
 
       actions.forEach((label, i) => {
         const bx = startX + i * (btnW + btnGap);
-        const btnBg = this.add.rectangle(bx, btnY, btnW, 36, 0x1a0f00, 0.9)
-          .setStrokeStyle(1.5, 0xffd700, 0.85)
+        const btnBg = this.add.rectangle(bx, btnY, btnW, 36, pri.bg, pri.bgAlpha)
+          .setStrokeStyle(1.5, pri.border, 0.85)
           .setDepth(2002)
           .setInteractive({ useHandCursor: true });
         const btnText = this.add.text(bx, btnY, label, {
-          fontSize: "15px", color: "#ffd700", fontFamily: "Arial", fontStyle: "bold"
+          fontSize: "15px", color: pri.text, fontFamily: "Arial", fontStyle: "bold"
         }).setOrigin(0.5).setDepth(2003);
 
-        btnBg.on("pointerover", () => btnBg.setFillStyle(0x2a1800, 0.95));
-        btnBg.on("pointerout", () => btnBg.setFillStyle(0x1a0f00, 0.9));
+        btnBg.on("pointerover", () => btnBg.setFillStyle(pri.hover, pri.hoverAlpha));
+        btnBg.on("pointerout", () => btnBg.setFillStyle(pri.bg, pri.bgAlpha));
         btnBg.on("pointerdown", () => {
           this.destroyDialog();
           resolve(label);

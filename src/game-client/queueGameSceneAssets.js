@@ -71,6 +71,8 @@ export function queueGameSceneAssets(load, _deps = {}) {
   load.image("open_hand", "assets/giantstomp/open_hand.png");
   load.image("snapped_hand", "assets/giantstomp/snapped_hand.png");
   load.image("golf_flag", "assets/giantstomp/golf_flag.png");
+  load.image("giant_golfswing", "assets/giantstomp/giant_golfswing.png");
+  load.image("golfhat_giant", "assets/giantstomp/golfhat_giant.png");
   load.multiatlas(
     "yellow_coin",
     "assets/giantstomp/yellow_coin/yellow_coin.json",

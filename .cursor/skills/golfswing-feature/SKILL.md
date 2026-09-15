@@ -67,9 +67,9 @@ Segment flow (`buildSegmentFlow.js`):
 
 Presentation (`GameScene.js`):
 
-1. Crush-style hand grab on `pickedCell` — animal is **unmasked from the reel**, parented to the hand grip, and follows through squeeze and exit left (behind the open hand).
-2. Reel frame + symbols fade; placeholder `goldswingBackground` label top-right; small distant animal sprite for the tee shot.
-3. Large centered hit zone ellipse; landing point comes from server `crosshairEndX/Y`. The aim path is **built backward from that pixel** — 2–3 sinus in/out loops with **per-loop ease-in/out**. The **tee shot fires around 86%** through the aim while the crosshair is still sliding into place.
+1. Crush-style hand grab on `pickedCell` — animal is **unmasked from the reel**, parented to the hand grip, and follows through squeeze and exit left (behind the open hand). **`golfhat_giant.png`** peeks in as the grab background (replaces `giant_in_bg` for this feature).
+2. Reel frame + symbols fade; **`giant_golfswing.png`** fades in with club-head tip anchored above ground (`clubHeadY` ~36px above tee), animal placed **left of the club** so it stays visible, holds briefly, then fades out.
+3. Green fairway fades in (`createGolfswingGreen`); large centered hit zone ellipse; landing point comes from server `crosshairEndX/Y`. The crosshair travels an **open arc** from a fixed start corner to that landing point — 2–3 perpendicular sine loops (asymmetric wave, zero offset at both endpoints) with **per-loop ease-in/out**. The **tee shot fires around 86%** through the aim while the crosshair is still sliding into place.
 4. **Bat swing:** animal always arcs toward the crosshair landing point; on hit it splats there, on miss it **flies through the crosshair, rushes past the camera**, then is destroyed off screen.
 5. **On hit:** animal splats at impact (blood for animals; super unicorn vanishes into a rainbow cloud on screen contact only). Super golf skips blood slide trails. The impact cloud sits behind the wheel, then after ~2.5s spreads outward and fades so it does not cover the jackpot wheel.
 6. **Super jackpot wheel:** rainbow segment colors plus a soft pulsing halo and rim rainbow dust bursts while the wheel spins (unicorn-style motes drifting off the rim).
